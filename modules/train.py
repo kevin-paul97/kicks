@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 from rich.progress import track
 import torch
 
-def train(model, dloader, optimizer, epochs=3, lr=0.001, loss=ls, device="cpu", save_dir="models/"):
+def train(model, dloader, optimizer, epochs=3, lr=0.001, loss=ls, device=None, save_dir="models/"):
     epoch_loss = []
-
-    model.to(device)
     model.train()
+    model.to(device)
+
 
     for epoch in track(range(epochs), total=epochs):
         batch_loss = []

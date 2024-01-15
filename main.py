@@ -10,16 +10,18 @@ dataloader = KickDataloader(dataset, batch_size=10)
 
 try:
     model = torch.load("models/model.pth")
+
     print("Model loaded succesfully... ")
 except:
     model = VAE(dataset.max_length, 400, 100, 100)
     print("Model not found, instanciated new one... ")
+
 info(model, dataset, dataloader)
 
-
+device = torch.device("mps") # 
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-train(model, dataloader, optimizer, epochs=30, device="cpu")
+train(model, dataloader, optimizer, epochs=3, device=device)
 
 with torch.no_grad():
     data_iter = iter(dataset)
