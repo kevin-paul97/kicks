@@ -9,8 +9,10 @@ class KickDataset(Dataset):
         self.tensors = []
         self.paths = []
         self.max_length = 0
+        self.max_length_path = None
         self._process_folder(dir)
-
+        self.tensors = self.pad()
+    
 
     def __len__(self):
         return len(self.tensors)
@@ -31,6 +33,8 @@ class KickDataset(Dataset):
                 self.tensors.append(audio)
                 if audio.shape[0] > self.max_length:
                     self.max_length = audio.shape[0]
+                    self.max_length_path = path
+
 
     def pad(self):
         return [torch.nn.functional.pad(audio, (0, self.max_length - audio.shape[0])) for audio in self.tensors]
