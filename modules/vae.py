@@ -23,7 +23,7 @@ class VAE(nn.Module):
         # Decoder - assuming the latent space is combined mu and logvar sizes
         self.decoder = nn.Sequential(
             nn.Linear(mu_size, hidden_dim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_dim, input_size // 50),
             nn.Tanh(),
             nn.Linear(input_size // 50, input_size)

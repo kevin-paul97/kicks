@@ -37,7 +37,10 @@ class KickDataset(Dataset):
 
 
     def pad(self):
-        return [torch.nn.functional.pad(audio, (0, self.max_length - audio.shape[0])) for audio in self.tensors]
+        if self.max_length % 2 != 0:
+            return [torch.nn.functional.pad(audio, (0, self.max_length - audio.shape[0])) for audio in self.tensors]
+        else:
+            return [torch.nn.functional.pad(audio, (0, self.max_length - audio.shape[0] + (self.max_length - audio.shape[0]) % 2)) for audio in self.tensors]
 
     def get_path(self, idx):
         return self.paths[idx] 

@@ -2,17 +2,24 @@ from torch import optim
 from modules import KickDataset, KickDataloader, VAE
 from modules.info import info
 from modules.train import train
-from torchaudio import save
+from torchaudio import save # type: ignore
 import torch
+
 dataset = KickDataset("data/kicks")
 dataloader = KickDataloader(dataset, batch_size=10)
 
-model = torch.load("models/model.pth")
-# model = VAE(dataset.max_length, 400, 100, 100)
-# info(model, dataset, dataloader)
+try:
+    model = torch.load("models/model.pth")
+    print("Model loaded succesfully... ")
+except:
+    model = VAE(dataset.max_length, 400, 100, 100)
+    print("Model not found, instanciated new one... ")
+info(model, dataset, dataloader)
+
+
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-train(model, dataloader, optimizer, epochs=1)
+train(model, dataloader, optimizer, epochs=30, device="cpu")
 
 with torch.no_grad():
     data_iter = iter(dataset)
