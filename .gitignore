@@ -1,0 +1,5 @@
+data/
+modules/__pycache__
+models/
+main.ipynb
+output/
