@@ -1,6 +1,6 @@
 from .loss import loss as ls
 import matplotlib.pyplot as plt
-from rich.progress import track
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, MofNCompleteColumn
 import torch
 
 def train(model, dloader, optimizer, epochs=3, lr=0.001, loss=ls, device=None, save_dir="models/"):
@@ -9,25 +9,36 @@ def train(model, dloader, optimizer, epochs=3, lr=0.001, loss=ls, device=None, s
     model.to(device)
 
 
-    for epoch in track(range(epochs), total=epochs):
-        batch_loss = []
+    with Progress(
+        TextColumn("[bold blue]Epoch {task.fields[epoch]}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        TextColumn("Loss: {task.fields[loss]:.6f}"),
+    ) as progress:
+        task = progress.add_task("Training", total=epochs, epoch=0, loss=0.0)
 
-        for batch_idx, data in enumerate(dloader):
+        for epoch in range(epochs):
+            batch_loss = []
 
-            data = data.to(device)
+            for batch_idx, data in enumerate(dloader):
 
-            for param in model.parameters():
-                param.grad = None
+                data = data.to(device)
 
-            output_batch, mu, logvar = model(data)
+                for param in model.parameters():
+                    param.grad = None
 
-            recon_loss = ls(output_batch, data, mu, logvar)
-            batch_loss.append(recon_loss.item())
+                output_batch, mu, logvar = model(data)
 
-            recon_loss.backward()
-            optimizer.step()
-            
-        epoch_loss.append(sum(batch_loss) / len(batch_loss))
+                recon_loss = ls(output_batch, data, mu, logvar)
+                batch_loss.append(recon_loss.item())
+
+                recon_loss.backward()
+                optimizer.step()
+
+            avg_loss = sum(batch_loss) / len(batch_loss)
+            epoch_loss.append(avg_loss)
+            progress.update(task, advance=1, epoch=epoch + 1, loss=avg_loss)
 
     torch.save(model, save_dir + "model.pth")
 

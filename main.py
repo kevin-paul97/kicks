@@ -21,13 +21,15 @@ info(model, dataset, dataloader)
 device = torch.device("mps")
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-train(model, dataloader, optimizer, epochs=3, device=device)
+train(model, dataloader, optimizer, epochs=200, device=device)
 
 with torch.no_grad():
-    data_iter = iter(dataset)
-    batch = next(data_iter).to(device)
-    output = model(batch)
-    output = output[0].detach().cpu()
-    if output.ndim == 1:
-        output = output.unsqueeze(0)
-    save("output/out.wav", output, 44100, channels_first=True)
+    model.eval()
+    for i in range(10):
+        z = torch.randn(1, 100).to(device)
+        output = model.decode(z).detach().cpu()
+        if output.ndim == 1:
+            output = output.unsqueeze(0)
+        save(f"output/kick_{i+1}.wav", output, 44100, channels_first=True)
+        print(f"Saved output/kick_{i+1}.wav")
+    print("Done! Generated 10 kick samples.")
