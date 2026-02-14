@@ -18,14 +18,14 @@ except:
 
 info(model, dataset, dataloader)
 
-device = torch.device("mps") # 
+device = torch.device("mps")
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 train(model, dataloader, optimizer, epochs=3, device=device)
 
 with torch.no_grad():
     data_iter = iter(dataset)
-    batch = next(data_iter)
+    batch = next(data_iter).to(device)
     output = model(batch)
     output = output[0].detach().cpu()
     if output.ndim == 1:

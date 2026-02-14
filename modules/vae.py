@@ -11,9 +11,9 @@ class VAE(nn.Module):
 
         # Encoder
         self.encoder = nn.Sequential(
-            nn.Linear(input_size, input_size // 50),
+            nn.Linear(input_size, input_size // 5000),
             nn.ReLU(),
-            nn.Linear(input_size // 50, hidden_dim),
+            nn.Linear(input_size // 5000, hidden_dim),
             nn.ReLU()
         )
         # Separate layers for mu and logvar with their respective sizes
@@ -24,9 +24,9 @@ class VAE(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(mu_size, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, input_size // 50),
+            nn.Linear(hidden_dim, input_size // 5000),
             nn.Tanh(),
-            nn.Linear(input_size // 50, input_size)
+            nn.Linear(input_size // 5000, input_size)
         )
 
     def encode(self, x):

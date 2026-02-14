@@ -14,7 +14,7 @@ def train(model, dloader, optimizer, epochs=3, lr=0.001, loss=ls, device=None, s
 
         for batch_idx, data in enumerate(dloader):
 
-            data.to(device)
+            data = data.to(device)
 
             for param in model.parameters():
                 param.grad = None
