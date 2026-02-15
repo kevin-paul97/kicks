@@ -1,0 +1,76 @@
+"""2D Convolutional VAE for log-mel spectrogram kick drum synthesis."""
+
+import torch
+import torch.nn as nn
+
+SAMPLE_RATE = 22050
+AUDIO_LENGTH = 16384  # ~0.74s at 22050 Hz
+N_FFT = 1024
+HOP_LENGTH = 256
+N_MELS = 128
+# Spectrogram shape: (1, 128, 64)
+
+
+class VAE(nn.Module):
+    """2D Conv VAE operating on log-mel spectrograms (1, 128, 64)."""
+
+    def __init__(self, latent_dim: int = 32) -> None:
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # Encoder: (B, 1, 128, 64) → (B, 128, 8, 4) via 4x stride-2 downsampling
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+
+        self._enc_flat = 128 * 8 * 4  # 4096
+        self.fc_mu = nn.Linear(self._enc_flat, latent_dim)
+        self.fc_logvar = nn.Linear(self._enc_flat, latent_dim)
+
+        # Decoder: z → (B, 128, 8, 4) then 4x upsample to (B, 1, 128, 64)
+        self.fc_decode = nn.Linear(latent_dim, self._enc_flat)
+
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, 1, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sigmoid(),
+        )
+
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        h = self.encoder(x)
+        h = h.view(h.size(0), -1)
+        return self.fc_mu(h), self.fc_logvar(h)
+
+    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        h = self.fc_decode(z)
+        h = h.view(h.size(0), 128, 8, 4)
+        return self.decoder(h)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar

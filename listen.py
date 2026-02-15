@@ -1,6 +1,6 @@
 from IPython.display import Audio, display
 from torch.nn.functional import normalize
-from modules import KickDataset
+from kicks import KickDataset
 import random
 
 

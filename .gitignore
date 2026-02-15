@@ -1,5 +1,6 @@
 data/
-modules/__pycache__
+kicks/__pycache__
 models/
 *.ipynb
 output/
+.DS_Store
