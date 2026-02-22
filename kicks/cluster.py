@@ -57,12 +57,12 @@ def compute_descriptors(spec_tensor: torch.Tensor) -> dict[str, float]:
     """Derive perceptual descriptors from a normalized log-mel spectrogram."""
     spec = spec_tensor.squeeze().numpy()
 
-    sub_energy = spec[:10, :].mean()
-    mid_energy = spec[20:50, :].mean()
+    sub_energy = spec[:5, :].mean()
+    mid_energy = spec[10:25, :].mean()
     attack_slope = np.diff(spec.mean(axis=0)[:5]).mean()
     punchiness = mid_energy + attack_slope
-    click = spec[80:, :5].mean()
-    brightness = spec[64:, :].mean()
+    click = spec[40:, :5].mean()
+    brightness = spec[32:, :].mean()
 
     envelope = spec.mean(axis=0)
     threshold = envelope.max() * 0.1

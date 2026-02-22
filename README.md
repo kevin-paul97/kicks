@@ -1,81 +1,137 @@
 # kicks
 
-A Variational Autoencoder (VAE) for synthesizing kick drum sounds using log-mel spectrograms.
+A VAE-powered kick drum synthesizer. Train a convolutional VAE on your kick samples, then generate new kicks in real-time by moving sliders in a web UI.
 
-Treats spectrograms as small images (128x128) and uses a 2D Conv VAE with beta-annealing. Audio is reconstructed via Griffin-Lim.
+## How it works
+
+```
+Kick samples (.wav)
+  -> Log-mel spectrograms (64x512)
+  -> Beta-VAE training (beta annealed 0 -> 4)
+  -> Latent vectors (16-dim)
+  -> PCA -> 5 principal components
+  -> Slider UI (PC1-PC5)
+  -> PCA inverse -> z vector
+  -> VAE decoder -> spectrogram
+  -> Griffin-Lim -> audio
+```
 
 ## Setup
 
-Requires Python 3.10+. Runs on Apple Silicon (MPS), CUDA, or CPU.
+### Requirements
+
+- Python 3.10+
+- Node.js 18+
+- Apple Silicon (MPS), CUDA GPU, or CPU
+
+### Install Python dependencies
 
 ```bash
-pip install torch torchaudio rich matplotlib scikit-learn tensorboard
+pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors
 ```
 
-Place `.wav` kick samples in `data/kicks/`.
+### Install frontend dependencies
+
+```bash
+cd web && npm install
+```
+
+### Add training data
+
+Place `.wav` kick drum samples in `data/kicks/`.
 
 ## Usage
 
-### Train + generate
+### 1. Train
 
 ```bash
 python main.py
 ```
 
-Trains for 500 epochs with beta-annealing (beta ramps 0 to 4 over 100 epochs). Monitors reconstruction loss (MSE) and KL divergence separately. Saves `models/best.pth` (best validation loss) and `models/checkpoint.pth` (final). Generates 20 reconstructions and 10 latent samples in `output/`.
+Trains for 500 epochs with beta-annealing (0 -> 4 over 100 epochs). Monitors MSE and KL divergence separately. Saves `models/best.pth` (best validation loss) and `models/checkpoint.pth` (final). Generates 20 reconstructions and 10 latent samples in `output/`.
 
-### Cluster + visualize
+### 2. Run the web synth
+
+Start the backend and frontend in two terminals:
+
+```bash
+# Terminal 1 -- API backend
+python app.py
+```
+
+```bash
+# Terminal 2 -- Next.js frontend
+cd web && npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). Move the PC1-PC5 sliders to generate kick drums in real-time.
+
+### 3. Cluster + visualize
 
 ```bash
 python cluster.py
-```
-
-Loads the best checkpoint, clusters the latent space with a GMM (component count selected via BIC), and writes results to TensorBoard:
-
-```bash
 tensorboard --logdir=runs/kick_clusters
 ```
 
-- **Projector** tab -- latent space visualization (color by cluster, sub, punch, click, brightness, decay)
-- **Audio** tab -- listen to each sample, keyed by index
+Clusters the latent space with a GMM (component count via BIC). TensorBoard shows:
 
-### Latent dimension experiment
+- **Projector** tab -- latent space colored by cluster and audio descriptors
+- **Audio** tab -- listen to each sample
+
+### 4. Latent dimension experiment
 
 ```bash
 python experiment_latent.py
 ```
 
-Trains three models with latent_dim 8, 16, and 32. Runs PCA on each and reports explained variance ratio for the top 3 components. Pick the dimension where 3 PCs explain 60%+ variance.
+Trains three models (latent_dim 8, 16, 32), runs PCA, reports explained variance. Pick the dim where 3 PCs explain 60%+ variance.
 
 ## Model
 
-2D Convolutional VAE (~596K parameters at latent_dim=16).
+2D Convolutional VAE (~998K parameters at latent_dim=16).
 
-- **Encoder**: 4 conv layers (1 -> 16 -> 32 -> 64 -> 128, stride 2, BatchNorm + ReLU), flatten, FC to mu/logvar
-- **Decoder**: FC from latent, reshape, 4 transposed conv layers (mirror of encoder), Sigmoid output
-- **Loss**: MSE reconstruction + beta * KL divergence (sum-reduced, per sample)
-- **Training**: 10% validation split, best checkpoint saved by validation loss
+| Setting | Value |
+|---------|-------|
+| Input | Log-mel spectrogram (1, 64, 512) |
+| Sample rate | 44100 Hz |
+| Audio length | ~1.49s (65536 samples) |
+| N_FFT | 2048 |
+| HOP_LENGTH | 128 |
+| N_MELS | 64 |
+| Latent dim | 16 |
+| Beta | 4 (annealed from 0 over 100 epochs) |
+| Griffin-Lim | 64 iterations + 30 Hz highpass |
+
+- **Encoder**: 4 conv layers (1->16->32->64->128, stride 2, BatchNorm+ReLU), flatten, FC to mu/logvar
+- **Decoder**: FC, reshape, 4 transposed conv layers (mirror), Sigmoid output
+- **Loss**: MSE + beta * KL (sum-reduced, per sample)
+- **Training**: 10% validation split, best checkpoint saved by val loss
 
 ## Project structure
 
 ```
 kicks/
-├── main.py              # Entry point: train + generate (Griffin-Lim)
-├── cluster.py           # Entry point: GMM clustering + TensorBoard projector
-├── experiment_latent.py # Entry point: latent dim comparison (8, 16, 32)
-├── listen.py            # Jupyter utility to preview samples
-├── kicks/               # Core package
-│   ├── model.py         # 2D Conv VAE
-│   ├── dataset.py       # Load audio -> normalized log-mel spectrograms
-│   ├── dataloader.py    # DataLoader wrapper
-│   ├── train.py         # Training loop with val split + best checkpoint
-│   ├── loss.py          # MSE + beta * KL loss (returns components separately)
-│   └── cluster.py       # GMM clustering, descriptors, TensorBoard embedding
-├── data/kicks/          # Input samples (not tracked)
-├── models/              # Saved checkpoints (not tracked)
-├── output/              # Generated kicks (not tracked)
-└── runs/                # TensorBoard logs (not tracked)
+├── app.py                  # API backend (Flask, port 8080)
+├── main.py                 # Train + generate audio samples
+├── cluster.py              # GMM clustering + TensorBoard
+├── experiment_latent.py    # Latent dim comparison (8, 16, 32)
+├── listen.py               # Jupyter utility to preview samples
+├── kicks/                  # Core Python package
+│   ├── model.py            # 2D Conv VAE + audio constants
+│   ├── dataset.py          # Load audio -> normalized log-mel spectrograms
+│   ├── dataloader.py       # DataLoader wrapper
+│   ├── train.py            # Training loop with val split + best checkpoint
+│   ├── loss.py             # MSE + beta * KL loss
+│   └── cluster.py          # GMM, PCA, descriptors, TensorBoard
+├── web/                    # Next.js + shadcn/ui frontend
+│   ├── app/page.tsx        # Main page with 5 PC sliders
+│   └── components/ui/      # shadcn components (Slider, Card)
+├── data/kicks/             # Input .wav samples (not tracked)
+├── models/                 # Saved checkpoints (not tracked)
+├── output/                 # Generated audio (not tracked)
+└── runs/                   # TensorBoard logs (not tracked)
 ```
 
-SUB X
-DECAY Y
+## License
+
+MIT

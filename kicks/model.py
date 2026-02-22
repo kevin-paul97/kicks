@@ -4,21 +4,21 @@ import torch
 import torch.nn as nn
 
 SAMPLE_RATE = 44100
-AUDIO_LENGTH = 32768  # ~0.74s at 44100 Hz
-N_FFT = 1024
-HOP_LENGTH = 256
-N_MELS = 128
-# Spectrogram shape: (1, 128, 128)
+AUDIO_LENGTH = 65536  # ~1.49s at 44100 Hz
+N_FFT = 2048
+HOP_LENGTH = 128
+N_MELS = 64
+# Spectrogram shape: (1, 64, 512)
 
 
 class VAE(nn.Module):
-    """2D Conv VAE operating on log-mel spectrograms (1, 128, 128)."""
+    """2D Conv VAE operating on log-mel spectrograms (1, 64, 512)."""
 
     def __init__(self, latent_dim: int = 16) -> None:
         super().__init__()
         self.latent_dim = latent_dim
 
-        # Encoder: (B, 1, 128, 128) → (B, 128, 8, 8) via 4x stride-2 downsampling
+        # Encoder: (B, 1, 64, 512) → (B, 128, 4, 32) via 4x stride-2 downsampling
         self.encoder = nn.Sequential(
             nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(16),
@@ -34,11 +34,11 @@ class VAE(nn.Module):
             nn.ReLU(),
         )
 
-        self._enc_flat = 128 * 8 * 8  # 8192
+        self._enc_flat = 128 * 4 * 32  # 16384
         self.fc_mu = nn.Linear(self._enc_flat, latent_dim)
         self.fc_logvar = nn.Linear(self._enc_flat, latent_dim)
 
-        # Decoder: z → (B, 128, 8, 8) then 4x upsample to (B, 1, 128, 128)
+        # Decoder: z → (B, 128, 4, 32) then 4x upsample to (B, 1, 64, 512)
         self.fc_decode = nn.Linear(latent_dim, self._enc_flat)
 
         self.decoder = nn.Sequential(
@@ -67,7 +67,7 @@ class VAE(nn.Module):
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         h = self.fc_decode(z)
-        h = h.view(h.size(0), 128, 8, 8)
+        h = h.view(h.size(0), 128, 4, 32)
         return self.decoder(h)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

@@ -67,16 +67,18 @@ _mel_fb_pinv = torch.linalg.pinv(_mel_fb.T)
 griffin_lim = torchaudio.transforms.GriffinLim(
     n_fft=N_FFT,
     hop_length=HOP_LENGTH,
+    n_iter=64,
 )
 
 
 def spec_to_audio(spec_normalized: torch.Tensor) -> torch.Tensor:
-    """Convert normalized spectrogram (B, 1, 128, 128) to audio waveform."""
+    """Convert normalized spectrogram to audio waveform."""
     log_mel = dataset.denormalize(spec_normalized.cpu())
     mel = torch.exp(log_mel)
     mel = mel.squeeze(1)
     linear = torch.clamp(_mel_fb_pinv @ mel, min=0.0)
     waveform = griffin_lim(linear)
+    waveform = torchaudio.functional.highpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=30.0)
     return waveform
 
 
