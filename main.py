@@ -25,7 +25,7 @@ param_count = sum(p.numel() for p in model.parameters())
 print(f"Model: {param_count:,} parameters, latent_dim=32")
 
 # Train
-train(model, dataloader, optimizer, epochs=200, device=device, beta=0.001)
+train(model, dataloader, optimizer, epochs=200, device=device, beta=0.1)
 
 # Griffin-Lim pipeline for spectrogram → audio
 # Build mel filterbank and compute pseudo-inverse for mel → linear conversion
@@ -45,7 +45,7 @@ griffin_lim = torchaudio.transforms.GriffinLim(
 
 
 def spec_to_audio(spec_normalized: torch.Tensor) -> torch.Tensor:
-    """Convert normalized spectrogram (B, 1, 128, 64) to audio waveform."""
+    """Convert normalized spectrogram (B, 1, 128, 128) to audio waveform."""
     log_mel = dataset.denormalize(spec_normalized.cpu())
     mel = torch.exp(log_mel)  # undo log
     mel = mel.squeeze(1)  # (B, N_MELS, T)

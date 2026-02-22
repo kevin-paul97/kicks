@@ -1,6 +1,10 @@
+__pycache__/
+*.pyc
+
 data/
-kicks/__pycache__
 models/
-*.ipynb
 output/
+runs/
+
+*.ipynb
 .DS_Store

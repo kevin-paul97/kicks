@@ -13,7 +13,7 @@ class KickDataset(Dataset):
     """Loads .wav kick samples and converts to normalized log-mel spectrograms.
 
     Two-pass loading: first compute all spectrograms to find global min/max,
-    then normalize to [0, 1]. Returns tensors of shape (1, 128, 64).
+    then normalize to [0, 1]. Returns tensors of shape (1, 128, 128).
     """
 
     def __init__(self, dir: str) -> None:
@@ -55,9 +55,9 @@ class KickDataset(Dataset):
             elif length < AUDIO_LENGTH:
                 audio = torch.nn.functional.pad(audio, (0, AUDIO_LENGTH - length))
 
-            # Compute log-mel spectrogram and truncate to 64 frames
+            # Compute log-mel spectrogram and truncate to 128 frames
             mel = self._mel_transform(audio)  # (1, N_MELS, T)
-            mel = mel[:, :, :64]
+            mel = mel[:, :, :128]
             log_mel = torch.log(mel + 1e-7)
 
             self._global_min = min(self._global_min, log_mel.min().item())

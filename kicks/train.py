@@ -17,7 +17,7 @@ def train(
     epochs: int = 500,
     device: torch.device | None = None,
     save_dir: str = "models/",
-    beta: float = 0.001,
+    beta: float = 0.01,
 ) -> list[float]:
     """Train the VAE. Returns per-epoch average losses."""
     epoch_loss: list[float] = []
