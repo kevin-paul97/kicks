@@ -20,9 +20,15 @@ dataloader = KickDataloader(dataset, batch_size=32, shuffle=False)
 print(f"Dataset: {len(dataset)} samples")
 
 # ── Load trained model ─────────────────────────────────────
-device = torch.device("mps")
-model = VAE(latent_dim=32)
-checkpoint = torch.load("models/checkpoint.pth", map_location=device)
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+
+model = VAE(latent_dim=16)
+checkpoint = torch.load("models/best.pth", map_location=device)
 model.load_state_dict(checkpoint["model"])
 model.to(device)
 print(f"Loaded checkpoint (epoch {checkpoint['epoch']})")

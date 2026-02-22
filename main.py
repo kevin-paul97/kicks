@@ -17,15 +17,21 @@ dataloader = KickDataloader(dataset, batch_size=32, shuffle=True)
 print(f"Dataset: {len(dataset)} samples")
 
 # Model
-device = torch.device("mps")
-model = VAE(latent_dim=32)
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+
+model = VAE(latent_dim=16)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 param_count = sum(p.numel() for p in model.parameters())
-print(f"Model: {param_count:,} parameters, latent_dim=32")
+print(f"Model: {param_count:,} parameters, latent_dim=16, device={device}")
 
 # Train
-train(model, dataloader, optimizer, epochs=200, device=device, beta=0.1)
+train(model, dataloader, optimizer, epochs=500, device=device, beta=4, beta_anneal_epochs=100)
 
 # Griffin-Lim pipeline for spectrogram → audio
 # Build mel filterbank and compute pseudo-inverse for mel → linear conversion
@@ -60,7 +66,7 @@ with torch.no_grad():
     model.eval()
 
     # Reconstructions
-    for i in range(min(10, len(dataset))):
+    for i in range(min(20, len(dataset))):
         original = dataset[i].unsqueeze(0).to(device)
         recon, _, _ = model(original)
         audio = spec_to_audio(recon)
@@ -69,7 +75,7 @@ with torch.no_grad():
 
     # Generated from latent space
     for i in range(10):
-        z = torch.randn(1, 32).to(device)
+        z = torch.randn(1, 16).to(device)
         spec = model.decode(z)
         audio = spec_to_audio(spec)
         torchaudio.save(f"output/gen_{i+1}.wav", audio, SAMPLE_RATE)

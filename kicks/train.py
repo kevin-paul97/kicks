@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn, MofNCompleteColumn
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 from .loss import loss as loss_fn
 from .model import VAE
@@ -18,47 +18,106 @@ def train(
     device: torch.device | None = None,
     save_dir: str = "models/",
     beta: float = 0.01,
-) -> list[float]:
-    """Train the VAE. Returns per-epoch average losses."""
+    beta_anneal_epochs: int = 0,
+    val_split: float = 0.1,
+) -> dict[str, list[float]]:
+    """Train the VAE. Returns per-epoch average losses for loss, mse, kl."""
     epoch_loss: list[float] = []
-    model.train()
+    epoch_mse: list[float] = []
+    epoch_kl: list[float] = []
     model.to(device)
+
+    # Train/val split
+    dataset = dloader.dataset
+    n_val = int(len(dataset) * val_split)
+    n_train = len(dataset) - n_val
+    train_set, val_set = random_split(dataset, [n_train, n_val])
+    train_loader = DataLoader(train_set, batch_size=dloader.batch_size, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=dloader.batch_size, shuffle=False)
+
+    best_val_loss = float("inf")
 
     with Progress(
         TextColumn("[bold blue]Epoch {task.fields[epoch]}"),
         BarColumn(),
         MofNCompleteColumn(),
         TimeRemainingColumn(),
-        TextColumn("Loss: {task.fields[loss]:.6f}"),
+        TextColumn("Loss: {task.fields[loss]:.4f}  MSE: {task.fields[mse]:.4f}  KL: {task.fields[kl]:.4f}"),
     ) as progress:
-        task = progress.add_task("Training", total=epochs, epoch=0, loss=0.0)
+        task = progress.add_task("Training", total=epochs, epoch=0, loss=0.0, mse=0.0, kl=0.0)
 
         for epoch in range(epochs):
-            batch_loss: list[float] = []
+            if beta_anneal_epochs > 0 and epoch < beta_anneal_epochs:
+                current_beta = beta * epoch / beta_anneal_epochs
+            else:
+                current_beta = beta
 
-            for data in dloader:
+            # Training
+            model.train()
+            batch_loss: list[float] = []
+            batch_mse: list[float] = []
+            batch_kl: list[float] = []
+
+            for data in train_loader:
                 data = data.to(device)
                 optimizer.zero_grad()
                 recon, mu, logvar = model(data)
-                l = loss_fn(recon, data, mu, logvar, beta=beta)
+                l, mse, kl = loss_fn(recon, data, mu, logvar, beta=current_beta)
                 batch_loss.append(l.item())
+                batch_mse.append(mse.item())
+                batch_kl.append(kl.item())
                 l.backward()
                 optimizer.step()
 
             avg_loss = sum(batch_loss) / len(batch_loss)
+            avg_mse = sum(batch_mse) / len(batch_mse)
+            avg_kl = sum(batch_kl) / len(batch_kl)
             epoch_loss.append(avg_loss)
-            progress.update(task, advance=1, epoch=epoch + 1, loss=avg_loss)
+            epoch_mse.append(avg_mse)
+            epoch_kl.append(avg_kl)
+            progress.update(task, advance=1, epoch=epoch + 1, loss=avg_loss, mse=avg_mse, kl=avg_kl)
 
+            # Validation
+            model.eval()
+            val_losses: list[float] = []
+            with torch.no_grad():
+                for data in val_loader:
+                    data = data.to(device)
+                    recon, mu, logvar = model(data)
+                    vl, _, _ = loss_fn(recon, data, mu, logvar, beta=current_beta)
+                    val_losses.append(vl.item())
+            val_loss = sum(val_losses) / len(val_losses)
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save({
+                    "model": model.state_dict(),
+                    "epoch": epoch + 1,
+                    "val_loss": val_loss,
+                }, save_dir + "best.pth")
+
+    # Save final checkpoint
     torch.save({
         "model": model.state_dict(),
         "epoch": epochs,
         "loss_history": epoch_loss,
     }, save_dir + "checkpoint.pth")
 
-    plt.plot(epoch_loss)
-    plt.ylabel("Loss")
-    plt.xlabel("Epoch")
-    plt.grid()
+    # Plot loss components
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4))
+    ax1.plot(epoch_loss)
+    ax1.set_title("Total Loss")
+    ax1.set_xlabel("Epoch")
+    ax1.grid()
+    ax2.plot(epoch_mse)
+    ax2.set_title("MSE (Reconstruction)")
+    ax2.set_xlabel("Epoch")
+    ax2.grid()
+    ax3.plot(epoch_kl)
+    ax3.set_title("KL Divergence")
+    ax3.set_xlabel("Epoch")
+    ax3.grid()
+    plt.tight_layout()
     plt.show()
 
-    return epoch_loss
+    return {"loss": epoch_loss, "mse": epoch_mse, "kl": epoch_kl}

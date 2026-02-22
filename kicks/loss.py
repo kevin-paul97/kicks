@@ -10,8 +10,12 @@ def loss(
     mu: torch.Tensor,
     logvar: torch.Tensor,
     beta: float = 0.001,
-) -> torch.Tensor:
-    """Beta-VAE loss: MSE + beta * KL."""
-    mse = F.mse_loss(recon, x)
-    kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    return mse + beta * kl
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Beta-VAE loss: MSE + beta * KL (sum-reduced, per sample).
+
+    Returns (total_loss, mse, kl) for separate logging.
+    """
+    batch_size = x.size(0)
+    mse = F.mse_loss(recon, x, reduction='sum') / batch_size
+    kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / batch_size
+    return mse + beta * kl, mse, kl

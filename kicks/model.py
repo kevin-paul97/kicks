@@ -14,7 +14,7 @@ N_MELS = 128
 class VAE(nn.Module):
     """2D Conv VAE operating on log-mel spectrograms (1, 128, 128)."""
 
-    def __init__(self, latent_dim: int = 32) -> None:
+    def __init__(self, latent_dim: int = 16) -> None:
         super().__init__()
         self.latent_dim = latent_dim
 
@@ -58,7 +58,7 @@ class VAE(nn.Module):
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
         h = h.view(h.size(0), -1)
-        return self.fc_mu(h), self.fc_logvar(h)
+        return self.fc_mu(h), torch.clamp(self.fc_logvar(h), min=-10, max=10)
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         std = torch.exp(0.5 * logvar)
