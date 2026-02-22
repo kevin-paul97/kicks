@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Slider } from "@/components/ui/slider";
-import { Card, CardContent } from "@/components/ui/card";
 
 const API = "http://localhost:8080";
 
 interface SliderConfig {
   id: number;
+  name: string;
   min: number;
   max: number;
   default: number;
@@ -71,19 +71,30 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <Card className="w-full max-w-md">
-        <CardContent className="pt-6 space-y-6">
-          <h1 className="text-2xl font-bold text-center tracking-tight">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 sm:p-8">
+      <div className="w-full max-w-lg">
+        {/* Header */}
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight mb-3">
             Kick Synth
           </h1>
+          <p className="text-muted-foreground text-sm sm:text-base leading-relaxed max-w-sm mx-auto">
+            Neural kick drum synthesizer powered by a variational autoencoder.
+            Shape your sound with four latent dimensions.
+          </p>
+        </div>
 
-          <div className="space-y-5">
+        {/* Main Card */}
+        <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm p-6 sm:p-8 space-y-8">
+          {/* Sliders */}
+          <div className="space-y-6">
             {sliders.map((s, i) => (
-              <div key={s.id} className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">PC{s.id}</span>
-                  <span className="font-mono text-muted-foreground">
+              <div key={s.id} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium tracking-wide uppercase text-foreground/80">
+                    {s.name}
+                  </label>
+                  <span className="font-mono text-xs tabular-nums text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-md">
                     {values[i]?.toFixed(2)}
                   </span>
                 </div>
@@ -98,15 +109,37 @@ export default function Home() {
             ))}
           </div>
 
-          {status && (
-            <p className="text-sm text-center text-muted-foreground">
-              {status}
-            </p>
-          )}
+          {/* Divider */}
+          <div className="border-t border-border/40" />
 
-          <audio ref={playerRef} controls className="w-full" />
-        </CardContent>
-      </Card>
+          {/* Audio Player */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium tracking-wide uppercase text-foreground/80">
+              Output
+            </label>
+            <audio ref={playerRef} controls className="w-full audio-player" />
+          </div>
+
+          {/* Status */}
+          <div className="h-5 flex items-center justify-center gap-2">
+            {status && (
+              <>
+                {status === "Generating..." && (
+                  <div className="size-3 rounded-full border-2 border-muted-foreground/40 border-t-foreground animate-spin" />
+                )}
+                <p className="text-xs text-muted-foreground">{status}</p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 text-center">
+          <p className="text-xs text-muted-foreground/60">
+            &copy; {new Date().getFullYear()} Kevin Paul Klaiber
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

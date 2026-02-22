@@ -13,7 +13,8 @@ from kicks import KickDataset, KickDataloader, VAE
 from kicks.cluster import extract_latents
 from kicks.model import SAMPLE_RATE, N_FFT, HOP_LENGTH, N_MELS
 
-N_PCS = 5
+PC_NAMES = ["Decay", "Brightness", "Subby", "Click"]
+N_PCS = len(PC_NAMES)
 
 # ── Startup ───────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ latents, _ = extract_latents(model, dataloader, device)
 pca = PCA(n_components=N_PCS)
 pca.fit(latents)
 
-pc_projected = pca.transform(latents)  # (N, 5)
+pc_projected = pca.transform(latents)
 PC_MINS = [float(pc_projected[:, i].min()) for i in range(N_PCS)]
 PC_MAXS = [float(pc_projected[:, i].max()) for i in range(N_PCS)]
 
@@ -74,6 +75,7 @@ def config():
     for i in range(N_PCS):
         sliders.append({
             "id": i + 1,
+            "name": PC_NAMES[i],
             "min": PC_MINS[i],
             "max": PC_MAXS[i],
             "default": (PC_MINS[i] + PC_MAXS[i]) / 2,
@@ -108,6 +110,6 @@ def generate():
 
 if __name__ == "__main__":
     for i in range(N_PCS):
-        print(f"PC{i+1} range: [{PC_MINS[i]:.3f}, {PC_MAXS[i]:.3f}]")
+        print(f"{PC_NAMES[i]} range: [{PC_MINS[i]:.3f}, {PC_MAXS[i]:.3f}]")
     print(f"API running at http://localhost:8080")
     app.run(debug=False, port=8080)
