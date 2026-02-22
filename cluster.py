@@ -1,7 +1,6 @@
 """Cluster kick drum latent space and visualize in TensorBoard."""
 
 import torch
-import torchaudio
 from sklearn.decomposition import PCA
 
 from kicks import KickDataset, KickDataloader, VAE
@@ -12,7 +11,8 @@ from kicks.cluster import (
     compute_descriptors,
     write_embedding,
 )
-from kicks.model import SAMPLE_RATE, N_FFT, HOP_LENGTH, N_MELS
+from kicks.model import SAMPLE_RATE
+from kicks.vocoder import load_vocoder, spec_to_audio
 
 # ── Dataset ────────────────────────────────────────────────
 dataset = KickDataset("data/kicks")
@@ -32,6 +32,9 @@ checkpoint = torch.load("models/best.pth", map_location=device)
 model.load_state_dict(checkpoint["model"])
 model.to(device)
 print(f"Loaded checkpoint (epoch {checkpoint['epoch']})")
+
+# ── BigVGAN vocoder ────────────────────────────────────────
+vocoder = load_vocoder(device)
 
 # ── Extract latents ────────────────────────────────────────
 latents, spectrograms = extract_latents(model, dataloader, device)
@@ -54,38 +57,10 @@ print(f"PCA variance ratio: {pca.explained_variance_ratio_}")
 # ── Audio descriptors ──────────────────────────────────────
 descriptors = [compute_descriptors(s) for s in spectrograms]
 
-# ── Griffin-Lim pipeline (spec → audio) ────────────────────
-_mel_fb = torchaudio.functional.melscale_fbanks(
-    n_freqs=N_FFT // 2 + 1,
-    f_min=0.0,
-    f_max=SAMPLE_RATE / 2.0,
-    n_mels=N_MELS,
-    sample_rate=SAMPLE_RATE,
-)
-_mel_fb_pinv = torch.linalg.pinv(_mel_fb.T)
-
-griffin_lim = torchaudio.transforms.GriffinLim(
-    n_fft=N_FFT,
-    hop_length=HOP_LENGTH,
-    n_iter=64,
-)
-
-
-def spec_to_audio(spec_normalized: torch.Tensor) -> torch.Tensor:
-    """Convert normalized spectrogram to audio waveform."""
-    log_mel = dataset.denormalize(spec_normalized.cpu())
-    mel = torch.exp(log_mel)
-    mel = mel.squeeze(1)
-    linear = torch.clamp(_mel_fb_pinv @ mel, min=0.0)
-    waveform = griffin_lim(linear)
-    waveform = torchaudio.functional.highpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=30.0)
-    return waveform
-
-
 # ── Write to TensorBoard ──────────────────────────────────
 log_dir = write_embedding(
     latents, spectrograms, cluster_labels, descriptors,
-    audio_fn=spec_to_audio,
+    audio_fn=lambda s: spec_to_audio(s, dataset, vocoder, device),
     log_dir="runs/kick_clusters",
 )
 

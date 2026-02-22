@@ -6,14 +6,14 @@ A VAE-powered kick drum synthesizer. Train a convolutional VAE on your kick samp
 
 ```
 Kick samples (.wav)
-  -> Log-mel spectrograms (64x512)
+  -> Log-mel spectrograms (128x256)
   -> Beta-VAE training (beta annealed 0 -> 4)
   -> Latent vectors (16-dim)
-  -> PCA -> 5 principal components
-  -> Slider UI (PC1-PC5)
+  -> PCA -> 4 principal components
+  -> Slider UI (Decay, Brightness, Subby, Click)
   -> PCA inverse -> z vector
   -> VAE decoder -> spectrogram
-  -> Griffin-Lim -> audio
+  -> BigVGAN vocoder -> audio
 ```
 
 ## Setup
@@ -27,7 +27,7 @@ Kick samples (.wav)
 ### Install Python dependencies
 
 ```bash
-pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors
+pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors bigvgan
 ```
 
 ### Install frontend dependencies
@@ -64,7 +64,7 @@ python app.py
 cd web && npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Move the PC1-PC5 sliders to generate kick drums in real-time.
+Open [http://localhost:3000](http://localhost:3000). Move the sliders to generate kick drums in real-time.
 
 ### 3. Cluster + visualize
 
@@ -92,15 +92,15 @@ Trains three models (latent_dim 8, 16, 32), runs PCA, reports explained variance
 
 | Setting | Value |
 |---------|-------|
-| Input | Log-mel spectrogram (1, 64, 512) |
+| Input | Log-mel spectrogram (1, 128, 256) |
 | Sample rate | 44100 Hz |
 | Audio length | ~1.49s (65536 samples) |
-| N_FFT | 2048 |
-| HOP_LENGTH | 128 |
-| N_MELS | 64 |
+| N_FFT | 1024 |
+| HOP_LENGTH | 256 |
+| N_MELS | 128 |
 | Latent dim | 16 |
 | Beta | 4 (annealed from 0 over 100 epochs) |
-| Griffin-Lim | 64 iterations + 30 Hz highpass |
+| Vocoder | BigVGAN v2 (MIT, pretrained at 44kHz) |
 
 - **Encoder**: 4 conv layers (1->16->32->64->128, stride 2, BatchNorm+ReLU), flatten, FC to mu/logvar
 - **Decoder**: FC, reshape, 4 transposed conv layers (mirror), Sigmoid output
@@ -122,9 +122,10 @@ kicks/
 │   ├── dataloader.py       # DataLoader wrapper
 │   ├── train.py            # Training loop with val split + best checkpoint
 │   ├── loss.py             # MSE + beta * KL loss
+│   ├── vocoder.py          # BigVGAN vocoder (spec -> audio)
 │   └── cluster.py          # GMM, PCA, descriptors, TensorBoard
 ├── web/                    # Next.js + shadcn/ui frontend
-│   ├── app/page.tsx        # Main page with 5 PC sliders
+│   ├── app/page.tsx        # Main page with 4 sliders
 │   └── components/ui/      # shadcn components (Slider, Card)
 ├── data/kicks/             # Input .wav samples (not tracked)
 ├── models/                 # Saved checkpoints (not tracked)

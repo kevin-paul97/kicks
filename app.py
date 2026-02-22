@@ -11,7 +11,8 @@ from sklearn.decomposition import PCA
 
 from kicks import KickDataset, KickDataloader, VAE
 from kicks.cluster import extract_latents
-from kicks.model import SAMPLE_RATE, N_FFT, HOP_LENGTH, N_MELS
+from kicks.model import SAMPLE_RATE
+from kicks.vocoder import load_vocoder, spec_to_audio
 
 PC_NAMES = ["Decay", "Brightness", "Subby", "Click"]
 N_PCS = len(PC_NAMES)
@@ -34,6 +35,8 @@ model.load_state_dict(checkpoint["model"])
 model.to(device)
 model.eval()
 
+vocoder = load_vocoder(device)
+
 latents, _ = extract_latents(model, dataloader, device)
 pca = PCA(n_components=N_PCS)
 pca.fit(latents)
@@ -43,25 +46,6 @@ PC_MINS = [float(pc_projected[:, i].min()) for i in range(N_PCS)]
 PC_MAXS = [float(pc_projected[:, i].max()) for i in range(N_PCS)]
 
 print(f"PCA variance explained: {pca.explained_variance_ratio_}")
-
-# Griffin-Lim pipeline
-_mel_fb = torchaudio.functional.melscale_fbanks(
-    n_freqs=N_FFT // 2 + 1, f_min=0.0,
-    f_max=SAMPLE_RATE / 2.0, n_mels=N_MELS, sample_rate=SAMPLE_RATE,
-)
-_mel_fb_pinv = torch.linalg.pinv(_mel_fb.T)
-griffin_lim = torchaudio.transforms.GriffinLim(n_fft=N_FFT, hop_length=HOP_LENGTH, n_iter=64)
-
-
-def spec_to_audio(spec_normalized: torch.Tensor) -> torch.Tensor:
-    log_mel = dataset.denormalize(spec_normalized.cpu())
-    mel = torch.exp(log_mel)
-    mel = mel.squeeze(1)
-    linear = torch.clamp(_mel_fb_pinv @ mel, min=0.0)
-    waveform = griffin_lim(linear)
-    waveform = torchaudio.functional.highpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=30.0)
-    return waveform
-
 
 # ── Flask app ─────────────────────────────────────────────────
 
@@ -97,9 +81,7 @@ def generate():
 
     with torch.no_grad():
         spec = model.decode(z)
-        waveform = spec_to_audio(spec)
-
-    waveform = waveform / (waveform.abs().max() + 1e-8)
+        waveform = spec_to_audio(spec, dataset, vocoder, device)
 
     buf = io.BytesIO()
     torchaudio.save(buf, waveform, SAMPLE_RATE, format="wav")

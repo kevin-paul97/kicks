@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 
-const API = "http://localhost:8080";
+const API = "/api";
 
 interface SliderConfig {
   id: number;
