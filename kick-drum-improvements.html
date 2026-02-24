@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kick Drum Generation — Improvement Plan</title>
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --surface: #16161d;
+      --surface2: #1e1e28;
+      --border: #2a2a38;
+      --accent: #7c6aff;
+      --accent2: #ff6a8a;
+      --accent3: #6affb8;
+      --text: #e4e4f0;
+      --muted: #888899;
+      --warn: #ffb86c;
+      --good: #50fa7b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+    a { color: var(--accent); }
+    .page { max-width: 900px; margin: 0 auto; }
+
+    h1 {
+      font-size: 2.4rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: .4rem;
+    }
+    .subtitle { color: var(--muted); margin-bottom: 2.5rem; font-size: .95rem; }
+
+    h2 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 2.5rem 0 .8rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    h2::before { content: attr(data-icon); font-size: 1.1rem; }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--accent2);
+      margin: 1.4rem 0 .4rem;
+    }
+
+    p { margin-bottom: .8rem; color: var(--text); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem;
+      margin-bottom: 1.2rem;
+    }
+    .card.warn { border-color: var(--warn); }
+    .card.good { border-color: var(--good); }
+    .card.accent { border-color: var(--accent); }
+
+    .tag {
+      display: inline-block;
+      font-size: .7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: .15rem .55rem;
+      border-radius: 4px;
+      margin-right: .4rem;
+      vertical-align: middle;
+    }
+    .tag.bug   { background: #ff3355; color: #fff; }
+    .tag.perf  { background: var(--accent); color: #fff; }
+    .tag.idea  { background: #50fa7b; color: #000; }
+    .tag.easy  { background: #444; color: var(--good); border: 1px solid var(--good); }
+    .tag.med   { background: #444; color: var(--warn); border: 1px solid var(--warn); }
+    .tag.hard  { background: #444; color: var(--accent2); border: 1px solid var(--accent2); }
+
+    code {
+      font-family: 'Fira Code', 'Cascadia Code', monospace;
+      font-size: .85em;
+      background: var(--surface2);
+      padding: .1em .45em;
+      border-radius: 4px;
+      color: var(--accent3);
+    }
+    pre {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      overflow-x: auto;
+      margin: .8rem 0;
+    }
+    pre code { background: none; padding: 0; font-size: .82em; }
+
+    ul, ol { padding-left: 1.4rem; margin-bottom: .8rem; }
+    li { margin-bottom: .35rem; }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .5rem;
+      margin: 1rem 0;
+      font-size: .82rem;
+    }
+    .flow-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: .3rem .7rem;
+      white-space: nowrap;
+    }
+    .flow-arrow { color: var(--accent); font-size: 1.1rem; }
+    .flow-box.highlight { border-color: var(--accent2); color: var(--accent2); }
+
+    .priority-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: .8rem 0;
+      font-size: .88rem;
+    }
+    .priority-table th {
+      background: var(--surface2);
+      color: var(--muted);
+      text-align: left;
+      padding: .5rem .8rem;
+      font-weight: 600;
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .priority-table td {
+      padding: .5rem .8rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .priority-table tr:last-child td { border-bottom: none; }
+    .priority-table tr:hover td { background: var(--surface2); }
+
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2.5rem 0;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <h1>Kick Drum Generation — Improvement Plan</h1>
+  <p class="subtitle">Analysis of <code>kicks/</code> codebase &nbsp;·&nbsp; Feb 2026</p>
+
+  <!-- ── CURRENT SYSTEM ── -->
+  <h2 data-icon="🔍">Current System at a Glance</h2>
+  <p>The pipeline encodes kick drum .wav files as log-mel spectrograms, trains a beta-VAE, reduces the latent space to 4 PCA axes, and decodes through BigVGAN into audio. Here's the full data flow:</p>
+
+  <div class="flow">
+    <span class="flow-box">.wav samples</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Log-mel spec (128×256)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box highlight">Beta-VAE (β=4, 16-dim z)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">PCA → 4 components</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">Sliders (Decay/Brightness/Subby/Click)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">PCA inverse → z</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box highlight">VAE decoder → spec</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-box">BigVGAN → audio</span>
+  </div>
+
+  <hr class="section-divider" />
+
+  <!-- ── BUGS / WEAKNESSES ── -->
+  <h2 data-icon="🐛">Current Weaknesses</h2>
+
+  <div class="card warn">
+    <h3><span class="tag bug">Bug</span> MSE reconstruction loss produces blurry spectrograms</h3>
+    <p>
+      <code>kicks/loss.py:19</code> uses pixel-wise MSE between the reconstructed and target spectrogram.
+      MSE minimises the mean squared error, which causes the decoder to predict the <em>average</em> of
+      possible spectrograms — resulting in blurry, low-energy reconstructions. This is the most
+      common failure mode of VAEs and directly hurts audio quality via the vocoder.
+    </p>
+    <p><strong>Symptom:</strong> Dull, "smeared" kick sounds, especially transients. The vocoder then has
+    to invent detail from a blurry spectrogram.</p>
+  </div>
+
+  <div class="card warn">
+    <h3><span class="tag bug">Bug</span> Global min/max normalisation is dataset-fragile</h3>
+    <p>
+      <code>kicks/dataset.py:66–74</code> computes a global min/max over the entire dataset and
+      normalises to [0,1]. Adding or removing samples changes these statistics, making checkpoints
+      incompatible unless you retrain. It also means a single loud or quiet outlier distorts
+      normalisation for everything else.
+    </p>
+  </div>
+
+  <div class="card warn">
+    <h3><span class="tag perf">Perf</span> Only 4 of 16 latent dims are exposed via PCA</h3>
+    <p>
+      <code>app.py:41</code> fits PCA with <code>n_components=4</code> from a 16-dim latent space.
+      Depending on the dataset, those 4 PCs may explain as little as 50–60% of variance
+      (see <code>experiment_latent.py</code> rationale). The other 75% of the latent space is
+      simply ignored, wasting model capacity.
+    </p>
+  </div>
+
+  <div class="card warn">
+    <h3><span class="tag perf">Perf</span> β=4 is aggressively high and hurts reconstruction</h3>
+    <p>
+      Beta-VAE with β=4 strongly regularises the latent space toward N(0,I), which improves
+      disentanglement but trades off heavily against reconstruction fidelity. For a
+      closed-domain synth (only kick drums), a lower β (0.5–1.0) would give much better
+      audio quality while still allowing meaningful latent-space navigation.
+    </p>
+  </div>
+
+  <div class="card warn">
+    <h3><span class="tag perf">Perf</span> Pretrained BigVGAN not fine-tuned on kicks</h3>
+    <p>
+      <code>kicks/vocoder.py</code> loads <code>nvidia/bigvgan_v2_44khz_128band_256x</code> and
+      uses pretrained weights unless a fine-tuned checkpoint exists. BigVGAN was trained on
+      general speech/music — not transient-heavy percussive content. Without fine-tuning,
+      it often produces ringing or softened transients on kick drums.
+    </p>
+  </div>
+
+  <div class="card warn">
+    <h3><span class="tag perf">Perf</span> No loudness normalisation before training</h3>
+    <p>
+      <code>dataset.py</code> converts directly to log-mel without loudness normalisation.
+      Kicks at −6 dBFS vs −18 dBFS look very different to the model even if they sound
+      the same perceptually. This adds spurious variation the model must learn to ignore.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag perf">UX</span> No way to save, randomise, or interpolate in the UI</h3>
+    <p>
+      <code>web/app/page.tsx</code> has sliders and a player but no: download button, randomise
+      button, saved presets, or interpolation between two sounds. These are table-stakes
+      features for a synthesiser UI.
+    </p>
+  </div>
+
+  <hr class="section-divider" />
+
+  <!-- ── IMPROVEMENT IDEAS ── -->
+  <h2 data-icon="💡">Improvement Ideas</h2>
+
+  <!-- 1. LOSS -->
+  <h3>1. Replace MSE with a perceptual spectral loss <span class="tag easy">Easy</span></h3>
+  <div class="card accent">
+    <p>
+      Swap the MSE in <code>loss.py</code> for a combination of:
+    </p>
+    <ul>
+      <li><strong>Spectral convergence loss</strong> — penalises the ratio of Frobenius norms, making the model care about relative energy rather than absolute pixel values.</li>
+      <li><strong>Log-magnitude loss</strong> — L1 on the log spectrogram (already in log-mel space, this is essentially just L1).</li>
+    </ul>
+    <pre><code># Spectral convergence
+sc = torch.norm(target - recon, 'fro') / (torch.norm(target, 'fro') + 1e-8)
+
+# Log magnitude L1
+lm = F.l1_loss(recon, target)
+
+recon_loss = sc + lm</code></pre>
+    <p>
+      This is the loss used in <em>HiFi-GAN</em> and related vocoders and is known to produce
+      significantly sharper, more transient-faithful reconstructions than MSE.
+    </p>
+    <p><strong>Files to touch:</strong> <code>kicks/loss.py</code></p>
+  </div>
+
+  <!-- 2. NORMALISATION -->
+  <h3>2. Switch to LUFS normalisation + fixed dB floor <span class="tag easy">Easy</span></h3>
+  <div class="card accent">
+    <p>
+      Before computing the mel spectrogram in <code>dataset.py</code>:
+    </p>
+    <ol>
+      <li>Normalise all audio to a fixed integrated loudness (e.g. −14 LUFS) using
+          <code>torchaudio.functional.loudness_norm</code> or <code>pyloudnorm</code>.</li>
+      <li>Replace the global min/max normalisation with a fixed dB range, e.g. clamp
+          log-mel to <code>[−80 dB, 0 dB]</code> and normalise to [0,1] with those fixed bounds.</li>
+    </ol>
+    <p>
+      The fixed bounds mean the normalisation constants can be stored as constants in
+      <code>model.py</code>, so checkpoints remain valid across different dataset versions.
+    </p>
+    <p><strong>Files to touch:</strong> <code>kicks/dataset.py</code>, <code>kicks/model.py</code></p>
+  </div>
+
+  <!-- 3. BETA -->
+  <h3>3. Lower β and use a better annealing schedule <span class="tag easy">Easy</span></h3>
+  <div class="card accent">
+    <p>
+      In <code>train.py</code>, the current schedule ramps β from 0 to 4 over 100 epochs
+      and then holds. Recommended changes:
+    </p>
+    <ul>
+      <li>Target β of <strong>0.5–1.0</strong> instead of 4. For a closed domain (just kicks) high
+          disentanglement is less important than sharp reconstruction.</li>
+      <li>Use a <strong>cyclical annealing</strong> schedule (anneal up and back down multiple times
+          across training). This is shown in the literature to prevent posterior collapse
+          while still maintaining reconstruction quality.</li>
+    </ul>
+    <p><strong>Files to touch:</strong> <code>kicks/train.py</code>, <code>main.py</code></p>
+  </div>
+
+  <!-- 4. LATENT DIM -->
+  <h3>4. Expose more latent dimensions — or use better dimensionality reduction <span class="tag easy">Easy</span></h3>
+  <div class="card accent">
+    <div class="grid2">
+      <div>
+        <strong>Option A — More sliders</strong>
+        <p>Bump <code>N_PCS</code> from 4 to 6–8 in <code>app.py</code>. Run
+        <code>experiment_latent.py</code> first to pick how many PCs explain ≥80% variance.
+        The UI can be grouped: top row "character", bottom row "shape".</p>
+      </div>
+      <div>
+        <strong>Option B — ICA instead of PCA</strong>
+        <p>Replace PCA with Independent Component Analysis (<code>sklearn.decomposition.FastICA</code>)
+        in <code>app.py</code>. ICA finds statistically independent directions rather than
+        orthogonal variance-maximising ones, often giving more musically meaningful axes.</p>
+      </div>
+    </div>
+    <p><strong>Files to touch:</strong> <code>app.py</code>, <code>web/app/page.tsx</code></p>
+  </div>
+
+  <!-- 5. ENCODER ARCH -->
+  <h3>5. Add residual connections to encoder/decoder <span class="tag med">Medium</span></h3>
+  <div class="card accent">
+    <p>
+      The current encoder (<code>kicks/model.py:22–35</code>) is a plain stack of 4 conv layers.
+      Adding residual connections prevents vanishing gradients and lets the model learn
+      both coarse and fine spectrogram structure simultaneously:
+    </p>
+    <pre><code>class ResBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn1   = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn2   = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        r = F.relu(self.bn1(self.conv1(x)))
+        r = self.bn2(self.conv2(r))
+        return F.relu(x + r)  # skip connection</code></pre>
+    <p>Insert one ResBlock after each stride-2 conv in both encoder and decoder.</p>
+    <p><strong>Files to touch:</strong> <code>kicks/model.py</code></p>
+  </div>
+
+  <!-- 6. DISCRIMINATOR -->
+  <h3>6. Add a spectrogram discriminator (VAE-GAN) <span class="tag hard">Hard</span></h3>
+  <div class="card accent">
+    <p>
+      The single biggest quality jump would come from adding an adversarial loss.
+      A small patch-based discriminator on the mel spectrogram will force the decoder
+      to produce sharp, realistic spectrograms instead of blurry reconstructions.
+      This is the architecture used in <em>EnCodec</em>, <em>DAC</em>, and related codecs.
+    </p>
+    <p>Training becomes a min-max game:</p>
+    <pre><code># Generator loss (VAE decoder)
+loss_g = recon_loss + beta * kl + lambda_adv * adversarial_loss(fake_spec)
+
+# Discriminator loss
+loss_d = discriminator_loss(real_spec, fake_spec.detach())</code></pre>
+    <p>
+      Even a lightweight discriminator (3-4 conv layers, ~100K params) operating on
+      the spectrogram would dramatically improve transient sharpness and sub-bass fidelity.
+    </p>
+    <p><strong>Files to touch:</strong> <code>kicks/model.py</code>, <code>kicks/loss.py</code>, <code>kicks/train.py</code></p>
+  </div>
+
+  <!-- 7. VOCODER FINETUNE -->
+  <h3>7. Fine-tune BigVGAN on kick drum spectrograms <span class="tag med">Medium</span></h3>
+  <div class="card accent">
+    <p>
+      The colab notebook <code>finetune_vocoder_colab.ipynb</code> already anticipates this.
+      The vocoder loads fine-tuned weights from <code>models/vocoder/best.pth</code> if present
+      (<code>kicks/vocoder.py:19–22</code>).
+    </p>
+    <p>Steps:</p>
+    <ol>
+      <li>Prepare pairs: real kick .wav + ground-truth mel spectrogram (from <code>dataset.py</code>).</li>
+      <li>Fine-tune BigVGAN with a frozen feature-extraction frontend and trainable upsampling stack for 10–50k steps.</li>
+      <li>Use a multi-period discriminator loss (already part of BigVGAN's training setup).</li>
+    </ol>
+    <p>
+      Expected result: tighter transient click, cleaner sub-bass, less vocoder artefacts
+      on silence between kick sounds.
+    </p>
+    <p><strong>Files to touch:</strong> <code>finetune_vocoder_colab.ipynb</code></p>
+  </div>
+
+  <!-- 8. UI -->
+  <h3>8. UI improvements: randomise, download, waveform, interpolate <span class="tag easy">Easy</span></h3>
+  <div class="card accent">
+    <p>All achievable inside <code>web/app/page.tsx</code> and <code>app.py</code>:</p>
+    <div class="grid2">
+      <div>
+        <strong>🎲 Randomise button</strong>
+        <p>Set sliders to random values sampled from a Gaussian clamped to the PC range. Encourages exploration.</p>
+      </div>
+      <div>
+        <strong>⬇️ Download WAV</strong>
+        <p>The <code>/generate</code> endpoint already returns a WAV blob. Just add an <code>a</code> tag with <code>download</code> attribute.</p>
+      </div>
+      <div>
+        <strong>📈 Waveform / spectrogram preview</strong>
+        <p>Use the Web Audio API <code>AnalyserNode</code> to draw a waveform or frequency display on a <code>&lt;canvas&gt;</code> in real-time from the audio blob.</p>
+      </div>
+      <div>
+        <strong>🔀 Interpolate A→B</strong>
+        <p>Let users save two slider states (A and B) and add a single "blend" knob that PCA-lerps between them. Great for morphing kicks.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Latent diffusion -->
+  <h3>9. (Advanced) Latent diffusion for generation diversity <span class="tag hard">Hard</span></h3>
+  <div class="card accent">
+    <p>
+      Instead of directly sampling from N(0,I) or navigating PCA axes, train a small
+      DDPM (denoising diffusion probabilistic model) in the 16-dim latent space.
+      At inference, run reverse diffusion for ~20 steps to get a diverse latent vector,
+      then decode with the VAE.
+    </p>
+    <p>Benefits:</p>
+    <ul>
+      <li>Covers the full shape of the data distribution, not just the principal axes.</li>
+      <li>Conditioned on descriptor tokens (sub-heavy, punchy, etc.) via classifier-free guidance.</li>
+      <li>The latent space is only 16-dim, so a tiny MLP denoiser (~50K params) is sufficient.</li>
+    </ul>
+    <p><strong>New file:</strong> <code>kicks/diffusion.py</code></p>
+  </div>
+
+  <hr class="section-divider" />
+
+  <!-- ── PRIORITY TABLE ── -->
+  <h2 data-icon="📋">Recommended Implementation Order</h2>
+
+  <table class="priority-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Change</th>
+        <th>Effort</th>
+        <th>Impact</th>
+        <th>File(s)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>Fixed dB normalisation (replace global min/max)</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>High — fixes fragility & consistency</td>
+        <td><code>dataset.py</code></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>Spectral convergence + L1 loss (replace MSE)</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>High — sharper reconstructions</td>
+        <td><code>loss.py</code></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>Lower β to 0.5–1.0, cyclical annealing</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>Medium-High — better reconstruction fidelity</td>
+        <td><code>train.py</code>, <code>main.py</code></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>LUFS loudness normalisation of input audio</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>Medium — reduces spurious variation</td>
+        <td><code>dataset.py</code></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>Expose 6–8 PCA components in the UI</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>Medium — more expressive control</td>
+        <td><code>app.py</code>, <code>page.tsx</code></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>Download + randomise buttons in UI</td>
+        <td><span class="tag easy">Easy</span></td>
+        <td>Medium — UX quality-of-life</td>
+        <td><code>page.tsx</code></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>Residual blocks in encoder/decoder</td>
+        <td><span class="tag med">Medium</span></td>
+        <td>Medium — better gradient flow, sharper detail</td>
+        <td><code>model.py</code></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>Fine-tune BigVGAN on kick data</td>
+        <td><span class="tag med">Medium</span></td>
+        <td>High — cleaner transients from vocoder</td>
+        <td><code>finetune_vocoder_colab.ipynb</code></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td>Spectrogram discriminator (VAE-GAN)</td>
+        <td><span class="tag hard">Hard</span></td>
+        <td>Very High — biggest quality jump</td>
+        <td><code>model.py</code>, <code>loss.py</code>, <code>train.py</code></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td>Latent diffusion for diversity + conditioning</td>
+        <td><span class="tag hard">Hard</span></td>
+        <td>Very High — generation variety + semantics</td>
+        <td>new <code>diffusion.py</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr class="section-divider" />
+
+  <!-- ── SUMMARY ── -->
+  <h2 data-icon="✅">Quick Summary</h2>
+  <div class="card good">
+    <p>The fastest wins, in order:</p>
+    <ol>
+      <li><strong>Fix the loss</strong> — spectral convergence + L1 is a 5-line change that will noticeably improve reconstruction sharpness immediately.</li>
+      <li><strong>Fix normalisation</strong> — use fixed dB bounds so the pipeline is robust and checkpoints stay valid.</li>
+      <li><strong>Lower β</strong> — drop from 4 to 0.5–1.0 for better audio quality with minimal disentanglement penalty in this closed domain.</li>
+      <li><strong>Normalise loudness</strong> — LUFS normalise before training so the model focuses on timbre not volume.</li>
+      <li><strong>UI polish</strong> — download + randomise buttons cost ~20 lines of React.</li>
+    </ol>
+    <p>If you want a genuine quality step-change: <strong>fine-tune BigVGAN</strong> on your kick dataset. The vocoder is the last mile and has the most headroom for improvement with a focused fine-tune.</p>
+  </div>
+
+  <p style="color: var(--muted); font-size: .8rem; margin-top: 2rem; text-align: center;">
+    Generated by Claude Code &nbsp;·&nbsp; kicks/ codebase analysis &nbsp;·&nbsp; Feb 2026
+  </p>
+
+</div>
+</body>
+</html>
