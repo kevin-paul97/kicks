@@ -1,4 +1,6 @@
-"""Cluster kick drum latent space and visualize in TensorBoard."""
+"""Cluster kick drum latent space - optimized for speed."""
+
+import json
 
 import torch
 from sklearn.decomposition import PCA
@@ -9,17 +11,14 @@ from kicks.cluster import (
     select_n_clusters,
     fit_gmm,
     compute_descriptors,
-    write_embedding,
 )
 from kicks.model import SAMPLE_RATE
 from kicks.vocoder import load_vocoder, spec_to_audio
 
-# ── Dataset ────────────────────────────────────────────────
 dataset = KickDataset("data/kicks")
-dataloader = KickDataloader(dataset, batch_size=32, shuffle=False)
+dataloader = KickDataloader(dataset, batch_size=64, shuffle=False)
 print(f"Dataset: {len(dataset)} samples")
 
-# ── Load trained model ─────────────────────────────────────
 if torch.cuda.is_available():
     device = torch.device("cuda")
 elif torch.backends.mps.is_available():
@@ -27,21 +26,24 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
+print(f"Using device: {device}")
+
 model = VAE(latent_dim=32)
 checkpoint = torch.load("models/best.pth", map_location=device)
 model.load_state_dict(checkpoint["model"])
 model.to(device)
+model.eval()
 print(f"Loaded checkpoint (epoch {checkpoint['epoch']})")
 
-# ── BigVGAN vocoder ────────────────────────────────────────
+print("Loading vocoder...")
 vocoder = load_vocoder(device)
 
-# ── Extract latents ────────────────────────────────────────
+print("Extracting latents...")
 latents, spectrograms = extract_latents(model, dataloader, device)
 print(f"Latents: {latents.shape}")
 
-# ── GMM clustering (BIC selection) ─────────────────────────
-best_k, bics = select_n_clusters(latents, max_k=10)
+print("Running GMM clustering...")
+best_k, _ = select_n_clusters(latents, max_k=10)
 print(f"BIC selected k={best_k}")
 
 gmm, cluster_labels, cluster_probs = fit_gmm(latents, best_k)
@@ -49,21 +51,41 @@ for k in range(best_k):
     count = (cluster_labels == k).sum()
     print(f"  Cluster {k}: {count} samples")
 
-# ── PCA inspection ─────────────────────────────────────────
-pca = PCA(n_components=min(3, latents.shape[1]))
+print("Computing PCA...")
+pca = PCA(n_components=3)
 latents_pca = pca.fit_transform(latents)
 print(f"PCA variance ratio: {pca.explained_variance_ratio_}")
 
-# ── Audio descriptors ──────────────────────────────────────
+print("Computing descriptors...")
 descriptors = [compute_descriptors(s) for s in spectrograms]
 
-# ── Write to TensorBoard ──────────────────────────────────
-log_dir = write_embedding(
-    latents, spectrograms, cluster_labels, descriptors,
-    audio_fn=lambda s: spec_to_audio(s, dataset, vocoder, device),
-    log_dir="runs/kick_clusters",
-)
+print("Generating audio previews...")
+audio_data = []
+with torch.no_grad():
+    for i in range(len(spectrograms)):
+        spec = spectrograms[i].unsqueeze(0)
+        audio = spec_to_audio(spec, dataset, vocoder, device)
+        audio = audio / (audio.abs().max() + 1e-8)
+        audio_data.append({
+            "sample_idx": i,
+            "cluster": int(cluster_labels[i]),
+            "pc1": float(latents_pca[i, 0]),
+            "pc2": float(latents_pca[i, 1]),
+            "pc3": float(latents_pca[i, 2]),
+            "descriptors": descriptors[i],
+            "probs": cluster_probs[i].tolist(),
+        })
+        if (i + 1) % 50 == 0:
+            print(f"  Processed {i + 1}/{len(spectrograms)}")
 
-print(f"\nDone! Run: tensorboard --logdir={log_dir}")
-print("  Projector tab → latent space with cluster labels & descriptor metadata")
-print("  Audio tab     → listen to each sample (keyed by index)")
+output = {
+    "pca_variance_explained": pca.explained_variance_ratio_.tolist(),
+    "n_clusters": best_k,
+    "samples": audio_data,
+}
+
+with open("output/cluster_analysis.json", "w") as f:
+    json.dump(output, f, indent=2)
+
+print(f"\nDone! Saved to output/cluster_analysis.json")
+print(f"  {len(audio_data)} samples, {best_k} clusters, 3 PCs")

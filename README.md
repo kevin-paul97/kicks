@@ -29,7 +29,7 @@ Kick samples (.wav)
 ### Install Python dependencies
 
 ```bash
-pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors bigvgan pyloudnorm
+pip install torch torchaudio rich matplotlib scikit-learn flask flask-cors bigvgan pyloudnorm
 ```
 
 ### Install frontend dependencies
@@ -72,13 +72,10 @@ Open [http://localhost:3000](http://localhost:3000). Move the sliders to generat
 
 ```bash
 python cluster.py
-tensorboard --logdir=runs/kick_clusters
+cd web && npm run dev
 ```
 
-Clusters the latent space with a GMM (component count via BIC). TensorBoard shows:
-
-- **Projector** tab -- latent space colored by cluster and audio descriptors
-- **Audio** tab -- listen to each sample
+Runs GMM clustering with BIC-selected k, PCA to 3 components, and saves analysis to `output/cluster_analysis.json`. Open [http://localhost:3000/cluster](http://localhost:3000/cluster) to view the 3D PCA visualization.
 
 ## Model
 

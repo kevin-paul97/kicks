@@ -365,7 +365,13 @@ export default function Home() {
           </div>
 
           {/* Footer */}
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center space-y-2">
+            <a
+              href="/cluster"
+              className="block text-xs text-violet-400/70 hover:text-violet-300 transition-colors"
+            >
+              View Cluster Visualization
+            </a>
             <p className="text-xs text-muted-foreground/50">
               &copy; {new Date().getFullYear()} Kevin Paul Klaiber
             </p>
