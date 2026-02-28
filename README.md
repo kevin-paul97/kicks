@@ -6,9 +6,11 @@ A VAE-powered kick drum synthesizer. Train a convolutional VAE on your kick samp
 
 ```
 Kick samples (.wav)
+  -> LUFS loudness normalisation (-14 LUFS)
   -> Log-mel spectrograms (128x256)
-  -> Beta-VAE training (beta annealed 0 -> 4)
-  -> Latent vectors (16-dim)
+  -> Fixed dB normalisation [-80, 0] -> [0, 1]
+  -> Beta-VAE training (beta=1.0, cyclical annealing)
+  -> Latent vectors (32-dim)
   -> PCA -> 4 principal components
   -> Slider UI (Decay, Brightness, Subby, Click)
   -> PCA inverse -> z vector
@@ -27,7 +29,7 @@ Kick samples (.wav)
 ### Install Python dependencies
 
 ```bash
-pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors bigvgan
+pip install torch torchaudio rich matplotlib scikit-learn tensorboard flask flask-cors bigvgan pyloudnorm
 ```
 
 ### Install frontend dependencies
@@ -48,7 +50,7 @@ Place `.wav` kick drum samples in `data/kicks/`.
 python main.py
 ```
 
-Trains for 500 epochs with beta-annealing (0 -> 4 over 100 epochs). Monitors MSE and KL divergence separately. Saves `models/best.pth` (best validation loss) and `models/checkpoint.pth` (final). Generates 20 reconstructions and 10 latent samples in `output/`.
+Trains for 200 epochs with cyclical beta annealing (4 cycles, beta ramping 0 -> 1.0 per cycle). Monitors reconstruction loss (spectral convergence + L1) and KL divergence separately. Saves `models/best.pth` (best validation loss) and `models/checkpoint.pth` (final). Generates 20 reconstructions and 10 latent samples in `output/`.
 
 ### 2. Run the web synth
 
@@ -64,7 +66,7 @@ python app.py
 cd web && npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Move the sliders to generate kick drums in real-time.
+Open [http://localhost:3000](http://localhost:3000). Move the sliders to generate kick drums in real-time. Use **Randomise** to explore the latent space and **Download WAV** to save kicks.
 
 ### 3. Cluster + visualize
 
@@ -88,23 +90,24 @@ Trains three models (latent_dim 8, 16, 32), runs PCA, reports explained variance
 
 ## Model
 
-2D Convolutional VAE (~998K parameters at latent_dim=16).
+2D Convolutional VAE (~998K parameters at latent_dim=32).
 
 | Setting | Value |
 |---------|-------|
 | Input | Log-mel spectrogram (1, 128, 256) |
 | Sample rate | 44100 Hz |
 | Audio length | ~1.49s (65536 samples) |
-| N_FFT | 1024 |
+| N_FFT | 2048 |
 | HOP_LENGTH | 256 |
 | N_MELS | 128 |
-| Latent dim | 16 |
-| Beta | 4 (annealed from 0 over 100 epochs) |
+| Latent dim | 32 |
+| Beta | 1.0 (cyclical annealing, 4 cycles) |
 | Vocoder | BigVGAN v2 (MIT, pretrained at 44kHz) |
 
-- **Encoder**: 4 conv layers (1->16->32->64->128, stride 2, BatchNorm+ReLU), flatten, FC to mu/logvar
+- **Encoder**: 4 conv layers (1->32->64->128->256, stride 2, BatchNorm+ReLU), flatten, FC to mu/logvar
 - **Decoder**: FC, reshape, 4 transposed conv layers (mirror), Sigmoid output
-- **Loss**: MSE + beta * KL (sum-reduced, per sample)
+- **Loss**: Spectral convergence + L1 + beta * KL
+- **Pre-processing**: LUFS loudness normalisation to -14 LUFS, fixed dB normalisation [-80, 0] -> [0, 1]
 - **Training**: 10% validation split, best checkpoint saved by val loss
 
 ## Project structure
@@ -118,14 +121,14 @@ kicks/
 ├── listen.py               # Jupyter utility to preview samples
 ├── kicks/                  # Core Python package
 │   ├── model.py            # 2D Conv VAE + audio constants
-│   ├── dataset.py          # Load audio -> normalized log-mel spectrograms
+│   ├── dataset.py          # Load audio -> LUFS norm -> log-mel -> fixed dB norm
 │   ├── dataloader.py       # DataLoader wrapper
-│   ├── train.py            # Training loop with val split + best checkpoint
-│   ├── loss.py             # MSE + beta * KL loss
+│   ├── train.py            # Training loop with cyclical beta annealing
+│   ├── loss.py             # Spectral convergence + L1 + beta * KL
 │   ├── vocoder.py          # BigVGAN vocoder (spec -> audio)
 │   └── cluster.py          # GMM, PCA, descriptors, TensorBoard
 ├── web/                    # Next.js + shadcn/ui frontend
-│   ├── app/page.tsx        # Main page with 4 sliders
+│   ├── app/page.tsx        # Main page with sliders, randomise, download
 │   └── components/ui/      # shadcn components (Slider, Card)
 ├── data/kicks/             # Input .wav samples (not tracked)
 ├── models/                 # Saved checkpoints (not tracked)

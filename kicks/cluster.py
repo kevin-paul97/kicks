@@ -2,13 +2,16 @@
 
 import os
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.mixture import GaussianMixture
 from sklearn.decomposition import PCA
 from torch.utils.tensorboard import SummaryWriter
 
-from .model import VAE, SAMPLE_RATE
+from .model import VAE, SAMPLE_RATE, HOP_LENGTH
 
 
 def extract_latents(
@@ -67,7 +70,8 @@ def compute_descriptors(spec_tensor: torch.Tensor) -> dict[str, float]:
     envelope = spec.mean(axis=0)
     threshold = envelope.max() * 0.1
     above = np.where(envelope > threshold)[0]
-    decay_length = above[-1] - above[0] if len(above) > 1 else 0
+    n_frames = spec.shape[1]
+    decay_length = (above[-1] - above[0]) / n_frames if len(above) > 1 else 0.0
 
     return {
         "sub": float(sub_energy),
@@ -112,19 +116,45 @@ def write_embedding(
             f"{desc['decay']:.1f}",
         ])
 
-    # Sprite thumbnails from spectrograms
-    thumb_size = 32
+    # Sprite thumbnails with frequency/time axes
+    thumb_size = 128
+    # Mel bin positions for approximate Hz labels
+    max_mel = 2595 * np.log10(1 + (SAMPLE_RATE / 2) / 700)
+    freq_ticks_hz = [100, 1000, 10000]
+    freq_tick_bins = [
+        2595 * np.log10(1 + f / 700) / max_mel * 128
+        for f in freq_ticks_hz
+    ]
+    freq_tick_labels = ["100", "1k", "10k"]
+
     thumbs = []
     for s in spectrograms:
-        s = s.squeeze()
-        s = (s - s.min()) / (s.max() - s.min() + 1e-8)
-        s = torch.nn.functional.interpolate(
-            s.unsqueeze(0).unsqueeze(0),
-            size=(thumb_size, thumb_size),
-            mode="bilinear",
-        ).squeeze()
-        thumbs.append(s)
-    label_img = torch.stack(thumbs).unsqueeze(1).repeat(1, 3, 1, 1)
+        s_np = s.squeeze().numpy()
+        n_frames = s_np.shape[1]
+        time_max = n_frames * HOP_LENGTH / SAMPLE_RATE
+
+        fig, ax = plt.subplots(figsize=(1.5, 1.2), dpi=96)
+        ax.imshow(s_np, aspect="auto", origin="lower", cmap="magma")
+        ax.set_xlabel("Time (s)", fontsize=5, labelpad=1)
+        ax.set_ylabel("Freq (Hz)", fontsize=5, labelpad=1)
+        ax.set_xticks(np.linspace(0, n_frames - 1, 4))
+        ax.set_xticklabels([f"{t:.1f}" for t in np.linspace(0, time_max, 4)], fontsize=4)
+        ax.set_yticks(freq_tick_bins)
+        ax.set_yticklabels(freq_tick_labels, fontsize=4)
+        ax.tick_params(length=2, pad=1)
+        fig.tight_layout(pad=0.3)
+
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(h, w, 3)
+        plt.close(fig)
+
+        thumb = torch.from_numpy(img.copy()).permute(2, 0, 1).float() / 255.0
+        thumb = torch.nn.functional.interpolate(
+            thumb.unsqueeze(0), size=(thumb_size, thumb_size), mode="bilinear",
+        ).squeeze(0)
+        thumbs.append(thumb)
+    label_img = torch.stack(thumbs)
 
     embed_writer.add_embedding(
         mat=torch.tensor(latents, dtype=torch.float32),

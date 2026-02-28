@@ -130,3 +130,20 @@ audio.audio-player {
   height: 44px;
   border-radius: 0.5rem;
 }
+
+/* Colored sliders */
+.slider-colored [data-slot="slider-range"] {
+  background: var(--slider-accent) !important;
+}
+.slider-colored [data-slot="slider-thumb"] {
+  border-color: var(--slider-accent) !important;
+  box-shadow: 0 0 12px var(--slider-glow);
+}
+.slider-colored [data-slot="slider-thumb"]:hover,
+.slider-colored [data-slot="slider-thumb"]:focus-visible {
+  ring-color: var(--slider-glow) !important;
+  box-shadow: 0 0 20px var(--slider-glow);
+}
+.slider-colored [data-slot="slider-track"] {
+  background: rgba(255, 255, 255, 0.06) !important;
+}

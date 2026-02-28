@@ -27,7 +27,7 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-model = VAE(latent_dim=16)
+model = VAE(latent_dim=32)
 checkpoint = torch.load("models/best.pth", map_location=device)
 model.load_state_dict(checkpoint["model"])
 model.to(device)

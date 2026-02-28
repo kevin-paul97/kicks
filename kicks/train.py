@@ -19,11 +19,17 @@ def train(
     save_dir: str = "models/",
     beta: float = 0.01,
     beta_anneal_epochs: int = 0,
+    beta_cycles: int = 4,
     val_split: float = 0.1,
 ) -> dict[str, list[float]]:
-    """Train the VAE. Returns per-epoch average losses for loss, mse, kl."""
+    """Train the VAE. Returns per-epoch average losses for loss, recon, kl.
+
+    Beta annealing uses a cyclical schedule: beta ramps linearly from 0 to the
+    target value over (beta_anneal_epochs / beta_cycles) epochs, then repeats.
+    This prevents posterior collapse while maintaining reconstruction quality.
+    """
     epoch_loss: list[float] = []
-    epoch_mse: list[float] = []
+    epoch_recon: list[float] = []
     epoch_kl: list[float] = []
     model.to(device)
 
@@ -42,40 +48,42 @@ def train(
         BarColumn(),
         MofNCompleteColumn(),
         TimeRemainingColumn(),
-        TextColumn("Loss: {task.fields[loss]:.4f}  MSE: {task.fields[mse]:.4f}  KL: {task.fields[kl]:.4f}"),
+        TextColumn("Loss: {task.fields[loss]:.4f}  Recon: {task.fields[recon]:.4f}  KL: {task.fields[kl]:.4f}"),
     ) as progress:
-        task = progress.add_task("Training", total=epochs, epoch=0, loss=0.0, mse=0.0, kl=0.0)
+        task = progress.add_task("Training", total=epochs, epoch=0, loss=0.0, recon=0.0, kl=0.0)
 
         for epoch in range(epochs):
             if beta_anneal_epochs > 0 and epoch < beta_anneal_epochs:
-                current_beta = beta * epoch / beta_anneal_epochs
+                cycle_len = beta_anneal_epochs / beta_cycles
+                cycle_pos = (epoch % cycle_len) / cycle_len
+                current_beta = beta * min(1.0, cycle_pos * 2)  # ramp up in first half, hold in second
             else:
                 current_beta = beta
 
             # Training
             model.train()
             batch_loss: list[float] = []
-            batch_mse: list[float] = []
+            batch_recon: list[float] = []
             batch_kl: list[float] = []
 
             for data in train_loader:
                 data = data.to(device)
                 optimizer.zero_grad()
                 recon, mu, logvar = model(data)
-                l, mse, kl = loss_fn(recon, data, mu, logvar, beta=current_beta)
+                l, recon_l, kl = loss_fn(recon, data, mu, logvar, beta=current_beta)
                 batch_loss.append(l.item())
-                batch_mse.append(mse.item())
+                batch_recon.append(recon_l.item())
                 batch_kl.append(kl.item())
                 l.backward()
                 optimizer.step()
 
             avg_loss = sum(batch_loss) / len(batch_loss)
-            avg_mse = sum(batch_mse) / len(batch_mse)
+            avg_recon = sum(batch_recon) / len(batch_recon)
             avg_kl = sum(batch_kl) / len(batch_kl)
             epoch_loss.append(avg_loss)
-            epoch_mse.append(avg_mse)
+            epoch_recon.append(avg_recon)
             epoch_kl.append(avg_kl)
-            progress.update(task, advance=1, epoch=epoch + 1, loss=avg_loss, mse=avg_mse, kl=avg_kl)
+            progress.update(task, advance=1, epoch=epoch + 1, loss=avg_loss, recon=avg_recon, kl=avg_kl)
 
             # Validation
             model.eval()
@@ -109,8 +117,8 @@ def train(
     ax1.set_title("Total Loss")
     ax1.set_xlabel("Epoch")
     ax1.grid()
-    ax2.plot(epoch_mse)
-    ax2.set_title("MSE (Reconstruction)")
+    ax2.plot(epoch_recon)
+    ax2.set_title("Reconstruction (SC + L1)")
     ax2.set_xlabel("Epoch")
     ax2.grid()
     ax3.plot(epoch_kl)
@@ -120,4 +128,4 @@ def train(
     plt.tight_layout()
     plt.show()
 
-    return {"loss": epoch_loss, "mse": epoch_mse, "kl": epoch_kl}
+    return {"loss": epoch_loss, "recon": epoch_recon, "kl": epoch_kl}

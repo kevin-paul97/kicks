@@ -25,14 +25,14 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-model = VAE(latent_dim=16)
+model = VAE(latent_dim=32)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 param_count = sum(p.numel() for p in model.parameters())
-print(f"Model: {param_count:,} parameters, latent_dim=16, device={device}")
+print(f"Model: {param_count:,} parameters, latent_dim=32, device={device}")
 
 # Train
-train(model, dataloader, optimizer, epochs=500, device=device, beta=4, beta_anneal_epochs=100)
+train(model, dataloader, optimizer, epochs=200, device=device, beta=1.0, beta_anneal_epochs=200, beta_cycles=4)
 
 # BigVGAN vocoder for spectrogram → audio
 vocoder = load_vocoder(device)
@@ -51,7 +51,7 @@ with torch.no_grad():
 
     # Generated from latent space
     for i in range(10):
-        z = torch.randn(1, 16).to(device)
+        z = torch.randn(1, 32).to(device)
         spec = model.decode(z)
         audio = spec_to_audio(spec, dataset, vocoder, device)
         torchaudio.save(f"output/gen_{i+1}.wav", audio, SAMPLE_RATE)

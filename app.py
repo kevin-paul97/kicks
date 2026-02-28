@@ -29,7 +29,7 @@ else:
 dataset = KickDataset("data/kicks")
 dataloader = KickDataloader(dataset, batch_size=32, shuffle=False)
 
-model = VAE(latent_dim=16)
+model = VAE(latent_dim=32)
 checkpoint = torch.load("models/best.pth", map_location=device)
 model.load_state_dict(checkpoint["model"])
 model.to(device)

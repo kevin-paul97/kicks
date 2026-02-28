@@ -37,14 +37,15 @@ def spec_to_audio(
 
     Args:
         spec_normalized: VAE output, shape (B, 1, 128, 256), values in [0, 1].
-        dataset: KickDataset with denormalize() method.
+        dataset: KickDataset (kept for API compatibility, denormalize is now static).
         vocoder: Loaded BigVGAN model.
         device: Torch device.
 
     Returns:
         Waveform tensor, shape (B, T).
     """
-    log_mel = dataset.denormalize(spec_normalized.cpu())
+    from .dataset import KickDataset
+    log_mel = KickDataset.denormalize(spec_normalized.cpu())
     log_mel = log_mel.squeeze(1)  # (B, 128, 256)
     with torch.no_grad():
         waveform = vocoder(log_mel.to(device))  # (B, 1, T)

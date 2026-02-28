@@ -5,7 +5,7 @@ import torch.nn as nn
 
 SAMPLE_RATE = 44100
 AUDIO_LENGTH = 65536  # ~1.49s at 44100 Hz
-N_FFT = 1024
+N_FFT = 2048
 HOP_LENGTH = 256
 N_MELS = 128
 # Spectrogram shape: (1, 128, 256)
@@ -14,16 +14,13 @@ N_MELS = 128
 class VAE(nn.Module):
     """2D Conv VAE operating on log-mel spectrograms (1, 128, 256)."""
 
-    def __init__(self, latent_dim: int = 16) -> None:
+    def __init__(self, latent_dim: int = 32) -> None:
         super().__init__()
         self.latent_dim = latent_dim
 
-        # Encoder: (B, 1, 128, 256) → (B, 128, 8, 16) via 4x stride-2 downsampling
+        # Encoder: (B, 1, 128, 256) → (B, 256, 8, 16) via 4x stride-2 downsampling
         self.encoder = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
@@ -32,26 +29,29 @@ class VAE(nn.Module):
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
         )
 
-        self._enc_flat = 128 * 8 * 16  # 16384
+        self._enc_flat = 256 * 8 * 16  # 32768
         self.fc_mu = nn.Linear(self._enc_flat, latent_dim)
         self.fc_logvar = nn.Linear(self._enc_flat, latent_dim)
 
-        # Decoder: z → (B, 128, 8, 16) then 4x upsample to (B, 1, 128, 256)
+        # Decoder: z → (B, 256, 8, 16) then 4x upsample to (B, 1, 128, 256)
         self.fc_decode = nn.Linear(latent_dim, self._enc_flat)
 
         self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
             nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.ConvTranspose2d(16, 1, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.Sigmoid(),
         )
 
@@ -67,7 +67,7 @@ class VAE(nn.Module):
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         h = self.fc_decode(z)
-        h = h.view(h.size(0), 128, 8, 16)
+        h = h.view(h.size(0), 256, 8, 16)
         return self.decoder(h)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
