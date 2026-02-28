@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import torch
@@ -9,13 +10,18 @@ from kicks.model import SAMPLE_RATE
 from kicks.train import train
 from kicks.vocoder import load_vocoder, spec_to_audio
 
+parser = argparse.ArgumentParser(description="Train kick drum VAE")
+parser.add_argument("-d", "--data", type=str, default="data/kicks",
+                    help="Path to training data directory (default: data/kicks)")
+args = parser.parse_args()
+
 os.makedirs("models", exist_ok=True)
 os.makedirs("output", exist_ok=True)
 
 # Dataset
-dataset = KickDataset("data/kicks")
+dataset = KickDataset(args.data)
 dataloader = KickDataloader(dataset, batch_size=32, shuffle=True)
-print(f"Dataset: {len(dataset)} samples")
+print(f"Dataset: {len(dataset)} samples from {args.data}")
 
 # Model
 if torch.cuda.is_available():

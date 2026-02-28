@@ -7,6 +7,8 @@ import * as THREE from "three";
 
 interface Sample {
   sample_idx: number;
+  filename: string;
+  original_path: string;
   cluster: number;
   pc1: number;
   pc2: number;
@@ -39,12 +41,14 @@ const CLUSTER_COLORS = [
 ];
 
 function Point({
-  sample,
+  coords,
+  cluster,
   isSelected,
   onClick,
   onHover,
 }: {
-  sample: Sample;
+  coords: { x: number; y: number; z: number };
+  cluster: number;
   isSelected: boolean;
   onClick: () => void;
   onHover: (hovering: boolean) => void;
@@ -54,32 +58,40 @@ function Point({
   
   useCursor(hovered);
 
-  const color = CLUSTER_COLORS[sample.cluster % CLUSTER_COLORS.length];
+  const sampleColor = CLUSTER_COLORS[cluster % CLUSTER_COLORS.length];
 
   return (
-    <mesh
-      ref={meshRef}
-      position={[sample.pc1, sample.pc2, sample.pc3]}
-      onClick={onClick}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        setHovered(true);
-        onHover(true);
-      }}
-      onPointerOut={(e) => {
-        setHovered(false);
-        onHover(false);
-      }}
-    >
-      <sphereGeometry args={[isSelected ? 0.15 : 0.08, 16, 16]} />
-      <meshStandardMaterial
-        color={color}
-        emissive={color}
-        emissiveIntensity={isSelected ? 0.8 : hovered ? 0.5 : 0.2}
-        transparent
-        opacity={0.9}
-      />
-    </mesh>
+    <group>
+      {isSelected && (
+        <mesh position={[coords.x, coords.y, coords.z]}>
+          <sphereGeometry args={[0.12, 16, 16]} />
+          <meshBasicMaterial color="white" transparent opacity={0.3} />
+        </mesh>
+      )}
+      <mesh
+        ref={meshRef}
+        position={[coords.x, coords.y, coords.z]}
+        onClick={onClick}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          onHover(true);
+        }}
+        onPointerOut={(e) => {
+          setHovered(false);
+          onHover(false);
+        }}
+      >
+        <sphereGeometry args={[isSelected ? 0.08 : 0.04, 12, 12]} />
+        <meshStandardMaterial
+          color={sampleColor}
+          emissive={sampleColor}
+          emissiveIntensity={isSelected ? 0.8 : hovered ? 0.6 : 0.3}
+          transparent
+          opacity={0.9}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -115,10 +127,12 @@ function Scene({
   data,
   selectedIdx,
   setSelectedIdx,
+  getCoords,
 }: {
   data: ClusterData;
   selectedIdx: number | null;
   setSelectedIdx: (idx: number | null) => void;
+  getCoords: (sample: Sample) => { x: number; y: number; z: number };
 }) {
   return (
     <>
@@ -129,7 +143,8 @@ function Scene({
       {data.samples.map((sample) => (
         <Point
           key={sample.sample_idx}
-          sample={sample}
+          coords={getCoords(sample)}
+          cluster={sample.cluster}
           isSelected={selectedIdx === sample.sample_idx}
           onClick={() => setSelectedIdx(selectedIdx === sample.sample_idx ? null : sample.sample_idx)}
           onHover={() => {}}
@@ -153,6 +168,9 @@ export default function ClusterPage() {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [spherize, setSpherize] = useState(false);
+  const [waveform, setWaveform] = useState<number[] | null>(null);
+  const [spectrogram, setSpectrogram] = useState<number[][] | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -165,24 +183,74 @@ export default function ClusterPage() {
       .catch(() => setLoading(false));
   }, []);
 
+  const getCoords = (sample: Sample) => {
+    if (!data || !spherize) {
+      return { x: sample.pc1, y: sample.pc2, z: sample.pc3 };
+    }
+    const pcs = data.samples.map((s) => [s.pc1, s.pc2, s.pc3]);
+    const means = [0, 1, 2].map((i) => pcs.reduce((a, b) => a + b[i], 0) / pcs.length);
+    const stds = [0, 1, 2].map((i) => Math.sqrt(pcs.reduce((a, b) => a + (b[i] - means[i]) ** 2, 0) / pcs.length));
+    return {
+      x: (sample.pc1 - means[0]) / stds[0],
+      y: (sample.pc2 - means[1]) / stds[1],
+      z: (sample.pc3 - means[2]) / stds[2],
+    };
+  };
+
   useEffect(() => {
     if (selectedIdx === null || !data) return;
 
     const sample = data.samples.find((s) => s.sample_idx === selectedIdx);
     if (!sample) return;
 
-    const params = `pc1=${sample.pc1}&pc2=${sample.pc2}&pc3=${sample.pc3}`;
-    fetch(`/api/generate?${params}`)
-      .then((r) => r.blob())
-      .then((blob) => {
-        if (audioUrl) URL.revokeObjectURL(audioUrl);
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
-        if (audioRef.current) {
-          audioRef.current.src = url;
-          audioRef.current.play();
+    setAudioUrl(`/api/play?idx=${selectedIdx}`);
+    if (audioRef.current) {
+      audioRef.current.src = `/api/play?idx=${selectedIdx}`;
+      audioRef.current.play();
+    }
+
+    fetch(`/api/play?idx=${selectedIdx}`)
+      .then((r) => r.arrayBuffer())
+      .then((arrayBuffer) => {
+        const audioContext = new AudioContext();
+        return audioContext.decodeAudioData(arrayBuffer);
+      })
+      .then((audioBuffer) => {
+        const channelData = audioBuffer.getChannelData(0);
+        const samples = 200;
+        const blockSize = Math.floor(channelData.length / samples);
+        const waveformData: number[] = [];
+        for (let i = 0; i < samples; i++) {
+          let sum = 0;
+          for (let j = 0; j < blockSize; j++) {
+            sum += Math.abs(channelData[i * blockSize + j]);
+          }
+          waveformData.push(sum / blockSize);
         }
-      });
+        const max = Math.max(...waveformData);
+        setWaveform(waveformData.map((v) => v / max));
+
+        const fftSize = 256;
+        const spectrogramData: number[][] = [];
+        const hopSize = Math.floor(channelData.length / 100);
+        for (let i = 0; i < 100; i++) {
+          const frame = channelData.slice(i * hopSize, i * hopSize + fftSize);
+          const magnitudes: number[] = [];
+          for (let j = 0; j < fftSize / 2; j++) {
+            let re = 0, im = 0;
+            for (let k = 0; k < fftSize; k++) {
+              const angle = (2 * Math.PI * j * k) / fftSize;
+              re += frame[k] * Math.cos(angle);
+              im -= frame[k] * Math.sin(angle);
+            }
+            magnitudes.push(Math.sqrt(re * re + im * im));
+          }
+          const maxMag = Math.max(...magnitudes);
+          spectrogramData.push(magnitudes.map((m) => maxMag > 0 ? m / maxMag : 0));
+        }
+        setSpectrogram(spectrogramData);
+      })
+      .catch(console.error);
   }, [selectedIdx, data]);
 
   const selectedSample = data?.samples.find((s) => s.sample_idx === selectedIdx);
@@ -212,8 +280,20 @@ export default function ClusterPage() {
         <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">
           Kick Cluster Visualizer
         </h1>
-        <div className="text-sm text-muted-foreground">
-          {data.samples.length} samples · {data.n_clusters} clusters · PC1 {data.pca_variance_explained[0].toFixed(1)}% · PC2 {data.pca_variance_explained[1].toFixed(1)}% · PC3 {data.pca_variance_explained[2].toFixed(1)}%
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setSpherize(!spherize)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              spherize
+                ? "bg-violet-500/30 text-violet-300 border border-violet-500/50"
+                : "bg-white/5 text-muted-foreground border border-white/10 hover:bg-white/10"
+            }`}
+          >
+            Spherize
+          </button>
+          <div className="text-sm text-muted-foreground">
+            {data.samples.length} samples · {data.n_clusters} clusters
+          </div>
         </div>
       </div>
 
@@ -221,7 +301,7 @@ export default function ClusterPage() {
         <div className="flex-1 h-[calc(100vh-65px)]">
           <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
             <Suspense fallback={<Loading />}>
-              <Scene data={data} selectedIdx={selectedIdx} setSelectedIdx={setSelectedIdx} />
+              <Scene data={data} selectedIdx={selectedIdx} setSelectedIdx={setSelectedIdx} getCoords={getCoords} />
             </Suspense>
           </Canvas>
         </div>
@@ -256,6 +336,9 @@ export default function ClusterPage() {
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Selected Sample #{selectedSample.sample_idx}
                 </h2>
+                <div className="text-sm font-mono text-violet-300 bg-white/5 px-3 py-2 rounded-lg mb-3 truncate">
+                  {selectedSample.filename}
+                </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-pink-400">PC1</span>
@@ -298,6 +381,56 @@ export default function ClusterPage() {
                   </a>
                 )}
               </div>
+
+              {waveform && (
+                <div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Waveform
+                  </h3>
+                  <div className="h-16 bg-black/30 rounded-lg border border-white/5 overflow-hidden">
+                    <svg viewBox="0 0 200 64" className="w-full h-full" preserveAspectRatio="none">
+                      <path
+                        d={`M 0 32 ${waveform.map((v, i) => `L ${i} ${32 - v * 28} L ${i} ${32 + v * 28}`).join(" ")}`}
+                        fill="none"
+                        stroke="url(#waveGradient)"
+                        strokeWidth="1"
+                      />
+                      <defs>
+                        <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#a78bfa" />
+                          <stop offset="50%" stopColor="#f472b6" />
+                          <stop offset="100%" stopColor="#34d399" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                </div>
+              )}
+
+              {spectrogram && (
+                <div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Spectrogram
+                  </h3>
+                  <div className="h-24 bg-black/30 rounded-lg border border-white/5 overflow-hidden">
+                    <svg viewBox="0 0 100 64" className="w-full h-full" preserveAspectRatio="none">
+                      {spectrogram.map((frame, x) =>
+                        frame.slice(0, 32).map((v, y) => (
+                          <rect
+                            key={`${x}-${y}`}
+                            x={x}
+                            y={64 - (y / 32) * 64}
+                            width="1"
+                            height="2"
+                            fill={`rgb(${Math.floor(v * 255)}, ${Math.floor(v * 180)}, ${Math.floor(v * 255)})`}
+                            opacity={0.8}
+                          />
+                        ))
+                      )}
+                    </svg>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
