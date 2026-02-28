@@ -80,14 +80,6 @@ Clusters the latent space with a GMM (component count via BIC). TensorBoard show
 - **Projector** tab -- latent space colored by cluster and audio descriptors
 - **Audio** tab -- listen to each sample
 
-### 4. Latent dimension experiment
-
-```bash
-python experiment_latent.py
-```
-
-Trains three models (latent_dim 8, 16, 32), runs PCA, reports explained variance. Pick the dim where 3 PCs explain 60%+ variance.
-
 ## Model
 
 2D Convolutional VAE (~998K parameters at latent_dim=32).
@@ -117,8 +109,6 @@ kicks/
 ├── app.py                  # API backend (Flask, port 8080)
 ├── main.py                 # Train + generate audio samples
 ├── cluster.py              # GMM clustering + TensorBoard
-├── experiment_latent.py    # Latent dim comparison (8, 16, 32)
-├── listen.py               # Jupyter utility to preview samples
 ├── kicks/                  # Core Python package
 │   ├── model.py            # 2D Conv VAE + audio constants
 │   ├── dataset.py          # Load audio -> LUFS norm -> log-mel -> fixed dB norm
