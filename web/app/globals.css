@@ -145,5 +145,8 @@ audio.audio-player {
   box-shadow: 0 0 20px var(--slider-glow);
 }
 .slider-colored [data-slot="slider-track"] {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+.dark .slider-colored [data-slot="slider-track"] {
   background: rgba(255, 255, 255, 0.06) !important;
 }

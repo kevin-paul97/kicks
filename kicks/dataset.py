@@ -1,4 +1,8 @@
-"""Dataset for loading kick drum audio as normalized log-mel spectrograms."""
+"""Dataset for loading kick drum audio as normalized log-mel spectrograms.
+
+Uses BigVGAN's mel_spectrogram() to ensure the representation matches
+what the vocoder was trained on (n_fft=1024, magnitude spectrum, ln clamp).
+"""
 
 import os
 
@@ -6,14 +10,16 @@ import numpy as np
 import pyloudnorm as pyln
 import torch
 import torchaudio
+from bigvgan import mel_spectrogram as bigvgan_mel_spectrogram
 from torch.utils.data import Dataset
 
-from .model import SAMPLE_RATE, AUDIO_LENGTH, N_FFT, HOP_LENGTH, N_MELS
+from .model import SAMPLE_RATE, AUDIO_LENGTH, N_FFT, HOP_LENGTH, WIN_SIZE, N_MELS, FMIN, FMAX
 
-# Fixed dB bounds for normalization — independent of dataset content.
-# These stay constant so checkpoints remain valid across dataset changes.
-LOG_MEL_MIN = -80.0  # dB floor (silence)
-LOG_MEL_MAX = 0.0    # dB ceiling
+# Fixed bounds for normalization — derived from BigVGAN's mel_spectrogram output.
+# ln(1e-5) = -11.5129 is the silence floor (BigVGAN clamps magnitudes to 1e-5).
+# 2.5 provides headroom above the observed dataset max (~2.23).
+LOG_MEL_MIN = -11.5129
+LOG_MEL_MAX = 2.5
 
 # Target integrated loudness for LUFS normalization
 TARGET_LUFS = -14.0
@@ -23,7 +29,8 @@ class KickDataset(Dataset):
     """Loads .wav kick samples and converts to normalized log-mel spectrograms.
 
     Pre-processing: LUFS loudness normalization of input audio.
-    Normalization: fixed dB bounds [-80, 0] mapped to [0, 1].
+    Mel computation: BigVGAN's mel_spectrogram (magnitude spectrum + ln clamp).
+    Normalization: fixed bounds [-11.51, 2.5] mapped to [0, 1].
     Returns tensors of shape (1, 128, 256).
     """
 
@@ -31,13 +38,6 @@ class KickDataset(Dataset):
         self.dir = dir
         self.tensors: list[torch.Tensor] = []
         self.paths: list[str] = []
-
-        self._mel_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=SAMPLE_RATE,
-            n_fft=N_FFT,
-            hop_length=HOP_LENGTH,
-            n_mels=N_MELS,
-        )
 
         self._lufs_meter = pyln.Meter(SAMPLE_RATE)
 
@@ -71,15 +71,20 @@ class KickDataset(Dataset):
                 audio_np = np.clip(audio_np, -1.0, 1.0)
                 audio = torch.from_numpy(audio_np).unsqueeze(0).float()
 
-            # Compute log-mel spectrogram and truncate/pad to 256 frames
-            mel = self._mel_transform(audio)  # (1, N_MELS, T)
-            if mel.shape[-1] > 256:
-                mel = mel[:, :, :256]
-            elif mel.shape[-1] < 256:
-                mel = torch.nn.functional.pad(mel, (0, 256 - mel.shape[-1]))
-            log_mel = torch.log(mel + 1e-7)
+            # Compute log-mel spectrogram using BigVGAN's function.
+            # This produces magnitude-based log mel with ln(clamp(mel, min=1e-5)).
+            log_mel = bigvgan_mel_spectrogram(
+                audio, N_FFT, N_MELS, SAMPLE_RATE, HOP_LENGTH, WIN_SIZE,
+                FMIN, FMAX, center=False,
+            )  # (1, N_MELS, T)
 
-            # Normalize to [0, 1] using fixed dB bounds
+            # Pad/truncate to 256 frames
+            if log_mel.shape[-1] > 256:
+                log_mel = log_mel[:, :, :256]
+            elif log_mel.shape[-1] < 256:
+                log_mel = torch.nn.functional.pad(log_mel, (0, 256 - log_mel.shape[-1]))
+
+            # Normalize to [0, 1] using fixed bounds
             log_mel = torch.clamp(log_mel, min=LOG_MEL_MIN, max=LOG_MEL_MAX)
             normalized = (log_mel - LOG_MEL_MIN) / (LOG_MEL_MAX - LOG_MEL_MIN)
 
@@ -96,5 +101,5 @@ class KickDataset(Dataset):
 
     @staticmethod
     def denormalize(spec: torch.Tensor) -> torch.Tensor:
-        """Convert [0,1] normalized spectrogram back to log-mel scale."""
+        """Convert [0,1] normalized spectrogram back to BigVGAN log-mel scale."""
         return spec * (LOG_MEL_MAX - LOG_MEL_MIN) + LOG_MEL_MIN

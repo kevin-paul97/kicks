@@ -50,9 +50,9 @@ def fit_gmm(
 
 def compute_descriptors(spec_tensor: torch.Tensor) -> dict[str, float]:
     """Derive perceptual descriptors from a normalized log-mel spectrogram.
-    
+
     Spectrogram shape: (1, 128, 256) - 128 mel bands, 256 time frames
-    Normalized to [0, 1] where 0 = -80dB, 1 = 0dB
+    Normalized to [0, 1] (BigVGAN log-mel scale)
     
     Mel band frequency mapping (approximate):
     - Bands 0-12:  ~20-80 Hz (sub-bass)

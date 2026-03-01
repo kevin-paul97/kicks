@@ -5,9 +5,12 @@ import torch.nn as nn
 
 SAMPLE_RATE = 44100
 AUDIO_LENGTH = 65536  # ~1.49s at 44100 Hz
-N_FFT = 2048
+N_FFT = 1024        # Must match BigVGAN (was 2048)
 HOP_LENGTH = 256
+WIN_SIZE = 1024     # Must match BigVGAN
 N_MELS = 128
+FMIN = 0
+FMAX = None         # Nyquist
 # Spectrogram shape: (1, 128, 256)
 
 

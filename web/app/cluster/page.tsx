@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo, useCallback, Suspense } from "react";
+import { useTheme } from "next-themes";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Html, useCursor } from "@react-three/drei";
 import * as THREE from "three";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /* ─── Types ─── */
 
@@ -104,8 +106,9 @@ function correlationColor(v: number): string {
   return `rgba(248, 113, 113, ${alpha})`;
 }
 
-function correlationTextColor(v: number): string {
-  return v >= 0 ? "#6ee7b7" : "#fca5a5";
+function correlationTextColor(v: number, isDark = true): string {
+  if (isDark) return v >= 0 ? "#6ee7b7" : "#fca5a5";
+  return v >= 0 ? "#047857" : "#dc2626";
 }
 
 function sampleColor(sample: Sample, mode: ColorMode, stats?: ClusterData["descriptor_stats"]): string {
@@ -123,12 +126,12 @@ function sampleColor(sample: Sample, mode: ColorMode, stats?: ClusterData["descr
 
 /* ─── Shared Styles ─── */
 
-const card = "rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm";
-const cardHover = `${card} hover:bg-white/[0.05] transition-colors`;
-const sectionTitle = "text-[11px] font-semibold text-zinc-400 uppercase tracking-widest";
+const card = "rounded-2xl border border-border bg-card/50 backdrop-blur-sm";
+const cardHover = `${card} hover:bg-card/70 transition-colors`;
+const sectionTitle = "text-[11px] font-semibold text-muted-foreground uppercase tracking-widest";
 const pill = "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150";
-const pillActive = `${pill} bg-white/[0.1] text-zinc-100 shadow-sm shadow-white/[0.04]`;
-const pillInactive = `${pill} text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]`;
+const pillActive = `${pill} bg-accent text-accent-foreground shadow-sm`;
+const pillInactive = `${pill} text-muted-foreground hover:text-foreground hover:bg-accent/50`;
 
 /* ─── Section: Variance Explained Bar ─── */
 
@@ -138,12 +141,12 @@ function VarianceBar({ variance, pcNames }: { variance: number[]; pcNames: PCNam
   return (
     <div className={`${card} p-5 space-y-3`}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-zinc-300">Variance Explained</span>
-        <span className="font-mono text-xs text-zinc-400 bg-white/[0.04] px-2.5 py-0.5 rounded-md">
+        <span className="text-xs font-medium text-foreground/80">Variance Explained</span>
+        <span className="font-mono text-xs text-muted-foreground bg-muted px-2.5 py-0.5 rounded-md">
           {(total * 100).toFixed(1)}%
         </span>
       </div>
-      <div className="h-4 rounded-full overflow-hidden flex bg-white/[0.04] gap-px">
+      <div className="h-4 rounded-full overflow-hidden flex bg-muted gap-px">
         {variance.map((v, i) => (
           <div
             key={i}
@@ -160,9 +163,9 @@ function VarianceBar({ variance, pcNames }: { variance: number[]; pcNames: PCNam
       <div className="flex gap-5 text-xs">
         {variance.map((v, i) => (
           <div key={i} className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PC_COLORS[i], boxShadow: '0 0 0 2px rgba(255,255,255,0.06)' }} />
-            <span className="text-zinc-300 font-medium">{pcNames[i]?.name ?? PC_LABELS_SHORT[i]}</span>
-            <span className="font-mono text-zinc-500">{(v * 100).toFixed(1)}%</span>
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PC_COLORS[i], boxShadow: '0 0 0 2px var(--border)' }} />
+            <span className="text-foreground/80 font-medium">{pcNames[i]?.name ?? PC_LABELS_SHORT[i]}</span>
+            <span className="font-mono text-muted-foreground">{(v * 100).toFixed(1)}%</span>
           </div>
         ))}
       </div>
@@ -185,6 +188,8 @@ function PCCard({
   loadings?: Record<string, number>;
   pcName: PCName;
 }) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   // Prefer loadings (direct descriptor weights) over correlations when PCA is on descriptors
   const values = loadings || correlations;
   const sorted = Object.entries(values).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
@@ -199,9 +204,9 @@ function PCCard({
               className="w-3 h-3 rounded-full"
               style={{ backgroundColor: PC_COLORS[pcIndex], boxShadow: `0 0 0 2px ${PC_COLORS[pcIndex]}40` }}
             />
-            <span className="text-[15px] font-bold text-zinc-100">{pcName.name}</span>
+            <span className="text-[15px] font-bold text-foreground">{pcName.name}</span>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 ml-[22px] font-mono">
+          <div className="text-[11px] text-muted-foreground mt-1 ml-[22px] font-mono">
             PC{pcIndex + 1} {loadings ? "· loadings" : "· correlations"}
           </div>
         </div>
@@ -219,11 +224,11 @@ function PCCard({
           const isPositive = corr >= 0;
           return (
             <div key={desc} className="flex items-center gap-2 text-xs">
-              <span className="w-12 text-zinc-400 text-right font-medium shrink-0">
+              <span className="w-12 text-muted-foreground text-right font-medium shrink-0">
                 {DESCRIPTOR_LABELS[desc as DescriptorKey] || desc}
               </span>
-              <div className="flex-1 h-5 relative rounded-md bg-white/[0.03] overflow-hidden">
-                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/[0.06]" />
+              <div className="flex-1 h-5 relative rounded-md bg-muted/50 overflow-hidden">
+                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-border" />
                 <div
                   className="absolute top-1 bottom-1 rounded-sm transition-all duration-500"
                   style={{
@@ -237,7 +242,7 @@ function PCCard({
               </div>
               <span
                 className="w-12 font-mono text-right shrink-0 font-medium"
-                style={{ color: correlationTextColor(corr) }}
+                style={{ color: correlationTextColor(corr, isDark) }}
               >
                 {corr > 0 ? "+" : ""}{corr.toFixed(2)}
               </span>
@@ -258,6 +263,8 @@ function CorrelationHeatmap({
   correlations: Record<string, Record<string, number>>;
   pcNames: PCName[];
 }) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   return (
     <div className={`${card} p-5 space-y-4`}>
       <h3 className={sectionTitle}>Correlation Matrix</h3>
@@ -265,7 +272,7 @@ function CorrelationHeatmap({
         <table className="w-full text-xs">
           <thead>
             <tr>
-              <th className="text-left text-zinc-500 pb-3 pr-4 font-normal" />
+              <th className="text-left text-muted-foreground pb-3 pr-4 font-normal" />
               {["pc1", "pc2", "pc3"].map((pc, i) => (
                 <th key={pc} className="pb-3 px-2 font-bold text-center text-[13px]" style={{ color: PC_COLORS[i] }}>
                   {pcNames[i]?.name ?? pc.toUpperCase()}
@@ -276,7 +283,7 @@ function CorrelationHeatmap({
           <tbody>
             {DESCRIPTOR_KEYS.map((desc) => (
               <tr key={desc}>
-                <td className="text-zinc-300 pr-4 py-1.5 font-medium text-[13px]">
+                <td className="text-foreground/80 pr-4 py-1.5 font-medium text-[13px]">
                   {DESCRIPTOR_LABELS[desc]}
                 </td>
                 {["pc1", "pc2", "pc3"].map((pc) => {
@@ -287,7 +294,7 @@ function CorrelationHeatmap({
                         className="rounded-lg px-3 py-2 font-mono font-semibold text-[13px] transition-colors"
                         style={{
                           backgroundColor: correlationColor(v),
-                          color: Math.abs(v) > 0.25 ? "#fff" : correlationTextColor(v),
+                          color: Math.abs(v) > 0.25 ? (isDark ? "#fff" : "#000") : correlationTextColor(v, isDark),
                         }}
                       >
                         {v > 0 ? "+" : ""}{v.toFixed(2)}
@@ -330,6 +337,8 @@ function ScatterPlot({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const padding = 44;
 
@@ -368,14 +377,22 @@ function ScatterPlot({
 
     ctx.clearRect(0, 0, w, h);
 
+    // Theme-aware canvas colors
+    const bgFill = isDark ? "rgba(255,255,255,0.01)" : "rgba(0,0,0,0.02)";
+    const gridStroke = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)";
+    const borderStroke = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)";
+    const labelFill = isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
+    const tickFill = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.3)";
+    const selectionStroke = isDark ? "#fff" : "#000";
+
     // Plot background
-    ctx.fillStyle = "rgba(255,255,255,0.01)";
+    ctx.fillStyle = bgFill;
     ctx.beginPath();
     ctx.roundRect(padding, padding, plotW, plotH, 6);
     ctx.fill();
 
     // Grid
-    ctx.strokeStyle = "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = gridStroke;
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
       const x = padding + (plotW * i) / 4;
@@ -385,7 +402,7 @@ function ScatterPlot({
     }
 
     // Border
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.strokeStyle = borderStroke;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect(padding, padding, plotW, plotH, 6);
@@ -407,7 +424,7 @@ function ScatterPlot({
 
       if (isSelected) {
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#fff";
+        ctx.strokeStyle = selectionStroke;
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -415,7 +432,7 @@ function ScatterPlot({
     ctx.globalAlpha = 1;
 
     // Axis labels
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.fillStyle = labelFill;
     ctx.font = "500 11px var(--font-geist-mono, monospace)";
     ctx.textAlign = "center";
     ctx.fillText(xLabel, w / 2, h - 4);
@@ -427,7 +444,7 @@ function ScatterPlot({
     ctx.restore();
 
     // Ticks
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillStyle = tickFill;
     ctx.font = "9px var(--font-geist-mono, monospace)";
     ctx.textAlign = "center";
     for (let i = 0; i <= 4; i++) {
@@ -438,7 +455,7 @@ function ScatterPlot({
       ctx.fillText(yVal.toFixed(1), padding - 6, padding + plotH - (plotH * i) / 4 + 3);
       ctx.textAlign = "center";
     }
-  }, [samples, xKey, yKey, xMin, xMax, yMin, yMax, colorMode, stats, selectedIdx, hoveredIdx, xLabel, yLabel]);
+  }, [samples, xKey, yKey, xMin, xMax, yMin, yMax, colorMode, stats, selectedIdx, hoveredIdx, xLabel, yLabel, isDark]);
 
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -531,15 +548,15 @@ function ClusterProfileCard({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 0 2px ${color}30` }} />
-          <span className="text-sm font-semibold text-zinc-100">Cluster {clusterIdx}</span>
-          <span className="text-[11px] text-zinc-500 font-mono bg-white/[0.04] px-1.5 py-0.5 rounded">{profile.count}</span>
+          <span className="text-sm font-semibold text-foreground">Cluster {clusterIdx}</span>
+          <span className="text-[11px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">{profile.count}</span>
         </div>
         <button
           onClick={onPlay}
           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
             isPlaying
-              ? "bg-white/[0.12] text-white scale-110"
-              : "bg-white/[0.04] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.08]"
+              ? "bg-accent text-foreground scale-110"
+              : "bg-muted text-muted-foreground hover:text-foreground hover:bg-accent"
           }`}
         >
           {isPlaying ? (
@@ -562,16 +579,16 @@ function ClusterProfileCard({
           const width = Math.min((val / (maxVal || 1)) * 100, 100);
           return (
             <div key={dk} className="flex items-center gap-2 text-[11px]">
-              <span className="w-10 text-zinc-400 text-right font-medium shrink-0">
+              <span className="w-10 text-muted-foreground text-right font-medium shrink-0">
                 {DESCRIPTOR_LABELS[dk]}
               </span>
-              <div className="flex-1 h-2.5 rounded-full bg-white/[0.04] overflow-hidden">
+              <div className="flex-1 h-2.5 rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${width}%`, backgroundColor: color, opacity: 0.75 }}
                 />
               </div>
-              <span className="w-8 text-zinc-400 font-mono text-right">{val.toFixed(2)}</span>
+              <span className="w-8 text-muted-foreground font-mono text-right">{val.toFixed(2)}</span>
             </div>
           );
         })}
@@ -598,35 +615,35 @@ function SampleInspector({
   pcNames: PCName[];
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.1] bg-gradient-to-b from-white/[0.05] to-white/[0.02] backdrop-blur-sm p-5 space-y-4 shadow-xl shadow-black/20">
+    <div className="rounded-2xl border border-border bg-gradient-to-b from-card/80 to-card/40 backdrop-blur-sm p-5 space-y-4 shadow-xl shadow-black/10 dark:shadow-black/20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
             onClick={onPlayPause}
-            className="w-10 h-10 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center hover:bg-white/[0.1] transition-all active:scale-95 shrink-0"
+            className="w-10 h-10 rounded-full bg-muted border border-border flex items-center justify-center hover:bg-accent transition-all active:scale-95 shrink-0"
           >
             {isPlaying ? (
-              <svg className="w-4 h-4 text-zinc-200" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-foreground/80" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="4" width="4" height="16" />
                 <rect x="14" y="4" width="4" height="16" />
               </svg>
             ) : (
-              <svg className="w-4 h-4 text-zinc-200 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-foreground/80 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
             )}
           </button>
           <div>
-            <div className="text-sm text-zinc-100 font-semibold truncate max-w-[300px]">
+            <div className="text-sm text-foreground font-semibold truncate max-w-[300px]">
               {sample.filename}
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-0.5">
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
               <div
                 className="w-2 h-2 rounded-full"
                 style={{ backgroundColor: CLUSTER_COLORS[sample.cluster % CLUSTER_COLORS.length] }}
               />
               <span>Cluster {sample.cluster}</span>
-              <span className="text-zinc-600">|</span>
+              <span className="text-muted-foreground/60">|</span>
               <span className="font-mono">
                 {pcNames[0]?.name ?? "PC1"}:{sample.pc1.toFixed(1)} {pcNames[1]?.name ?? "PC2"}:{sample.pc2.toFixed(1)} {pcNames[2]?.name ?? "PC3"}:{sample.pc3.toFixed(1)}
               </span>
@@ -635,7 +652,7 @@ function SampleInspector({
         </div>
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center hover:bg-white/[0.08] transition-colors text-zinc-400 hover:text-zinc-200"
+          className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path d="M18 6 6 18M6 6l12 12" />
@@ -644,7 +661,7 @@ function SampleInspector({
       </div>
 
       {waveform && (
-        <div className="h-16 rounded-xl bg-black/30 border border-white/[0.05] overflow-hidden">
+        <div className="h-16 rounded-xl bg-muted border border-border overflow-hidden">
           <svg viewBox="0 0 200 64" className="w-full h-full" preserveAspectRatio="none">
             <defs>
               <linearGradient id="inspectorWaveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -668,14 +685,14 @@ function SampleInspector({
         {DESCRIPTOR_KEYS.map((dk) => {
           const val = sample.descriptors[dk];
           return (
-            <div key={dk} className="flex-1 bg-white/[0.03] rounded-xl p-2.5 text-center">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1">
+            <div key={dk} className="flex-1 bg-muted/50 rounded-xl p-2.5 text-center">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1">
                 {DESCRIPTOR_LABELS[dk]}
               </div>
-              <div className="text-sm font-mono font-bold text-zinc-100">
+              <div className="text-sm font-mono font-bold text-foreground">
                 {val.toFixed(3)}
               </div>
-              <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+              <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full rounded-full"
                   style={{
@@ -700,11 +717,13 @@ function Point3D({
   color,
   isSelected,
   onClick,
+  selectionColor = "white",
 }: {
   coords: { x: number; y: number; z: number };
   color: string;
   isSelected: boolean;
   onClick: () => void;
+  selectionColor?: string;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
@@ -714,7 +733,7 @@ function Point3D({
       {isSelected && (
         <mesh position={[coords.x, coords.y, coords.z]}>
           <sphereGeometry args={[0.1, 16, 16]} />
-          <meshBasicMaterial color="white" transparent opacity={0.25} />
+          <meshBasicMaterial color={selectionColor} transparent opacity={0.25} />
         </mesh>
       )}
       <mesh
@@ -764,6 +783,13 @@ function Scene3D({
   spherize: boolean;
   pcNames: PCName[];
 }) {
+  const { resolvedTheme } = useTheme();
+  const gridColor = useMemo(
+    () => new THREE.Color(resolvedTheme === "dark" ? 0xffffff : 0x000000),
+    [resolvedTheme]
+  );
+  const gridOpacity = resolvedTheme === "dark" ? 0.06 : 0.12;
+
   const flips: [number, number, number] = [
     pcNames[0]?.correlation < 0 ? -1 : 1,
     pcNames[1]?.correlation < 0 ? -1 : 1,
@@ -790,12 +816,28 @@ function Scene3D({
     pcNames[2]?.name ?? "PC3",
   ];
 
+  const gridPos: [number, number, number] = spherize ? [0, 0, 0] : [2, 0, 2];
+
+  const sceneBg = useMemo(
+    () => new THREE.Color(resolvedTheme === "dark" ? 0x08080c : 0xf5f5f5),
+    [resolvedTheme]
+  );
+
   return (
     <>
-      <ambientLight intensity={0.5} />
+      <color attach="background" args={[sceneBg]} key={`bg-${resolvedTheme}`} />
+      <ambientLight intensity={resolvedTheme === "dark" ? 0.5 : 0.7} />
       <pointLight position={[10, 10, 10]} intensity={1} />
       <pointLight position={[-10, -10, -10]} intensity={0.5} />
       <Axes3D labels={axisLabels} />
+      <gridHelper
+        key={`grid-${resolvedTheme}-${spherize}`}
+        args={[8, 16, gridColor, gridColor]}
+        position={gridPos}
+        material-transparent
+        material-opacity={gridOpacity}
+        material-depthWrite={false}
+      />
       {data.samples.map((sample) => (
         <Point3D
           key={sample.sample_idx}
@@ -803,6 +845,7 @@ function Scene3D({
           color={sampleColor(sample, colorMode, data.descriptor_stats)}
           isSelected={selectedIdx === sample.sample_idx}
           onClick={() => setSelectedIdx(selectedIdx === sample.sample_idx ? null : sample.sample_idx)}
+          selectionColor={resolvedTheme === "dark" ? "white" : "black"}
         />
       ))}
       <OrbitControls enableDamping dampingFactor={0.05} />
@@ -837,14 +880,14 @@ function DescriptorDistribution({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-zinc-300 font-semibold">{DESCRIPTOR_LABELS[descriptor]}</span>
+        <span className="text-foreground/80 font-semibold">{DESCRIPTOR_LABELS[descriptor]}</span>
         {stats && (
-          <span className="text-zinc-500 font-mono">
+          <span className="text-muted-foreground font-mono">
             {stats.mean.toFixed(2)} +/- {stats.std.toFixed(2)}
           </span>
         )}
       </div>
-      <div className="flex items-end gap-px h-12 rounded-lg bg-white/[0.02] p-1">
+      <div className="flex items-end gap-px h-12 rounded-lg bg-muted/30 p-1">
         {histogram.map((count, i) => (
           <div
             key={i}
@@ -858,7 +901,7 @@ function DescriptorDistribution({
           />
         ))}
       </div>
-      <div className="flex justify-between text-[9px] text-zinc-500 font-mono">
+      <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
         <span>{min.toFixed(2)}</span>
         <span>{max.toFixed(2)}</span>
       </div>
@@ -870,7 +913,7 @@ function DescriptorDistribution({
 
 function ColorModeSelector({ colorMode, setColorMode }: { colorMode: ColorMode; setColorMode: (m: ColorMode) => void }) {
   return (
-    <div className="flex gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.06]">
+    <div className="flex gap-1 bg-card/50 rounded-xl p-1 border border-border">
       {(["cluster", ...DESCRIPTOR_KEYS] as ColorMode[]).map((mode) => (
         <button
           key={mode}
@@ -1013,10 +1056,10 @@ export default function ClusterPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#08080c] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full border-2 border-zinc-700 border-t-violet-400 animate-spin" />
-          <span className="text-zinc-400 text-sm">Loading analysis data...</span>
+          <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30 border-t-violet-400 animate-spin" />
+          <span className="text-muted-foreground text-sm">Loading analysis data...</span>
         </div>
       </div>
     );
@@ -1024,10 +1067,10 @@ export default function ClusterPage() {
 
   if (!data) {
     return (
-      <div className="min-h-screen bg-[#08080c] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-3">
-          <div className="text-zinc-300 font-medium">No analysis data found</div>
-          <code className="text-xs text-zinc-500 bg-white/[0.05] px-4 py-2 rounded-xl inline-block">
+          <div className="text-foreground/80 font-medium">No analysis data found</div>
+          <code className="text-xs text-muted-foreground bg-muted px-4 py-2 rounded-xl inline-block">
             python cluster.py
           </code>
         </div>
@@ -1038,32 +1081,33 @@ export default function ClusterPage() {
   const totalVariance = data.pca_variance_explained.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="min-h-screen bg-[#08080c] text-zinc-100">
+    <div className="min-h-screen bg-background text-foreground">
       {/* ─── Header ─── */}
-      <header className="border-b border-white/[0.06] bg-[#08080c]/90 backdrop-blur-xl sticky top-0 z-20">
+      <header className="border-b border-border bg-background/90 backdrop-blur-xl sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-zinc-100 to-zinc-400 bg-clip-text text-transparent">
+            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
               PCA Analysis
             </h1>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] font-mono text-zinc-400 bg-white/[0.04] px-2 py-0.5 rounded-md">
+              <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
                 {data.samples.length} samples
               </span>
-              <span className="text-[11px] font-mono text-zinc-400 bg-white/[0.04] px-2 py-0.5 rounded-md">
+              <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
                 {data.n_clusters} clusters
               </span>
-              <span className="text-[11px] font-mono text-zinc-400 bg-white/[0.04] px-2 py-0.5 rounded-md">
+              <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
                 {(totalVariance * 100).toFixed(1)}% variance
               </span>
               {data.pca_source === "descriptors_zscore" && (
-                <span className="text-[11px] font-mono text-zinc-500 bg-white/[0.04] px-2 py-0.5 rounded-md">
+                <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
                   PCA on descriptors
                 </span>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1 border border-white/[0.06]">
+          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-card/50 rounded-xl p-1 border border-border">
             <button
               onClick={() => setView("analysis")}
               className={view === "analysis" ? pillActive : pillInactive}
@@ -1077,6 +1121,8 @@ export default function ClusterPage() {
               3D View
             </button>
           </div>
+          <ThemeToggle />
+          </div>
         </div>
       </header>
 
@@ -1086,13 +1132,13 @@ export default function ClusterPage() {
             <ColorModeSelector colorMode={colorMode} setColorMode={setColorMode} />
             <button
               onClick={() => setSpherize(!spherize)}
-              className={spherize ? pillActive : `${pillInactive} bg-black/40 backdrop-blur-sm border border-white/[0.06]`}
+              className={spherize ? pillActive : `${pillInactive} bg-background/40 backdrop-blur-sm border border-border`}
             >
               Spherize
             </button>
           </div>
           <Canvas camera={{ position: [5, 5, 5], fov: 50 }}>
-            <Suspense fallback={<Html center><div className="text-zinc-400 text-sm">Loading 3D...</div></Html>}>
+            <Suspense fallback={<Html center><div className="text-muted-foreground text-sm">Loading 3D...</div></Html>}>
               <Scene3D data={data} selectedIdx={selectedIdx} setSelectedIdx={setSelectedIdx} colorMode={colorMode} spherize={spherize} pcNames={pcNames} />
             </Suspense>
           </Canvas>
@@ -1209,7 +1255,7 @@ export default function ClusterPage() {
             </div>
           </section>
 
-          <div className="pt-6 pb-10 text-center text-[11px] text-zinc-600">
+          <div className="pt-6 pb-10 text-center text-[11px] text-muted-foreground/60">
             Kick Drum PCA Analysis
           </div>
         </main>
