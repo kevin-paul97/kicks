@@ -301,13 +301,7 @@ export default function Home() {
               <button
                 onClick={() => {
                   if (!sliders.length) return;
-                  const randomized = sliders.map((s) => {
-                    const mid = (s.min + s.max) / 2;
-                    const range = s.max - s.min;
-                    const gauss =
-                      (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
-                    return Math.max(s.min, Math.min(s.max, mid + gauss * range));
-                  });
+                  const randomized = sliders.map(() => Math.random());
                   setValues(randomized);
                   if (debounceRef.current) clearTimeout(debounceRef.current);
                   debounceRef.current = setTimeout(
@@ -365,13 +359,7 @@ export default function Home() {
           </div>
 
           {/* Footer */}
-          <div className="mt-8 text-center space-y-2">
-            <a
-              href="/cluster"
-              className="block text-xs text-violet-400/70 hover:text-violet-300 transition-colors"
-            >
-              View Cluster Visualization
-            </a>
+          <div className="mt-8 text-center">
             <p className="text-xs text-muted-foreground/50">
               &copy; {new Date().getFullYear()} Kevin Paul Klaiber
             </p>
