@@ -9,9 +9,9 @@ Kick samples (.wav)
   -> Strip: isolate kick hits, exclude loops
   -> LUFS loudness normalisation (-14 LUFS)
   -> Log-mel spectrograms (128x256)
-  -> Fixed normalisation [-11.51, 2.5] -> [0, 1]
-  -> Beta-VAE training (beta=0.3, cyclical annealing, free bits)
-  -> Latent vectors (32-dim)
+  -> Fixed normalisation [-11.51, 3.0] -> [0, 1]
+  -> Beta-VAE training (beta=0.02, cyclical annealing, free bits)
+  -> Latent vectors (64-dim)
   -> PCA -> 5 principal components (auto-named by perceptual correlation)
   -> Slider UI (e.g. Sub, Punch, Click, Bright, Decay)
   -> PCA inverse -> z vector
@@ -104,15 +104,17 @@ Options:
 uv run kicks train
 ```
 
-Trains for 200 epochs with cyclical beta annealing (4 cycles, beta ramping 0 → 0.3 per cycle) and a cosine annealing learning rate scheduler. Monitors reconstruction loss (multi-resolution spectral convergence + frequency-weighted L1) and KL divergence (with 0.5-nat free bits per dimension) separately. Uses a 10% validation split; saves `models/vae_best.pth` (best validation loss). Generates per-epoch loss plots and output reconstructions/samples.
+Trains for 200 epochs with cyclical beta annealing (4 cycles, beta ramping 0 → 0.02 per cycle) and a cosine annealing learning rate scheduler. Monitors reconstruction loss (multi-resolution spectral convergence + energy-weighted L1) and KL divergence (with 0.2-nat free bits per dimension) separately. Logs per-epoch latent diagnostics (active dimensions, raw/mean KL) to confirm capacity use and detect posterior collapse. Uses a 10% validation split; saves `models/vae_best.pth` (best validation loss). Generates per-epoch loss plots and output reconstructions/samples.
 
 Options:
 
 ```
 --data, -d        Path to training data (default: data/kicks)
 --epochs, -e      Number of epochs (default: 200)
---latent-dim      Latent dimension (default: 32)
---beta            KL beta weight (default: 0.3, capped in cyclical annealing)
+--latent-dim      Latent dimension (default: 64)
+--beta            KL beta weight (default: 0.02, capped in cyclical annealing)
+--free-bits       Per-dim KL floor in nats (default: 0.2)
+--beta-cycles     Number of cyclical beta annealing cycles (default: 4)
 ```
 
 ### 3. Fine-tune vocoder (optional)
@@ -258,7 +260,7 @@ Data, models, and output directories are mounted as volumes from the host for pe
 
 ## Model
 
-2D Convolutional VAE (latent_dim=32 by default).
+2D Convolutional VAE (latent_dim=64 by default).
 
 | Setting | Value |
 |---------|-------|
@@ -271,18 +273,18 @@ Data, models, and output directories are mounted as volumes from the host for pe
 | N_MELS | 128 |
 | FMIN | 0 |
 | FMAX | None (Nyquist) |
-| Latent dim | 32 (reduced to prevent posterior collapse) |
-| Beta | 0.3 (cyclical annealing, 4 cycles, 0→max ramp per cycle) |
-| Free bits | 0.5 nats per latent dimension |
-| Loss | Multi-resolution (scales 1, 2, 4) frequency-weighted reconstruction + β·KL |
+| Latent dim | 64 (free-bits KL prevents posterior collapse) |
+| Beta | 0.02 (cyclical annealing, 4 cycles, 0→max ramp per cycle) |
+| Free bits | 0.2 nats per latent dimension |
+| Loss | Multi-resolution (scales 1, 2, 4) energy-weighted reconstruction + β·KL |
 | Vocoder | BigVGAN v2 (MIT, pretrained at 44kHz) or Griffin-LIM (no GPU needed) |
 | PCA components | 5 (auto-named by perceptual correlation) |
 
 - **Encoder**: 4 conv layers (1 → 32 → 64 → 128 → 256, stride 2, BatchNorm+ReLU), flatten, FC to mu/logvar (logvar clamped to [-10, 10])
 - **Decoder**: FC, reshape, 4 transposed conv layers (mirror encoder), Sigmoid output
-- **Loss**: Multi-resolution spectral convergence + frequency-weighted L1 across 3 scales + β·KL with 0.5-nat free bits per dimension
+- **Loss**: Multi-resolution spectral convergence + energy-weighted L1 across 3 scales + β·KL with 0.2-nat free bits per dimension
 - **Optimizer**: Adam (lr=1e-3) with CosineAnnealingLR scheduler
-- **Pre-processing**: LUFS loudness normalisation to -14 LUFS, BigVGAN ln-clamp normalisation [-11.51, 2.5] → [0, 1]
+- **Pre-processing**: LUFS loudness normalisation to -14 LUFS, BigVGAN ln-clamp normalisation [-11.51, 3.0] → [0, 1]
 - **Training**: 10% validation split, best checkpoint saved by val loss
 - **PCA slider naming**: Auto-correlates PCs with perceptual descriptors (sub, punch, click, bright, decay) and flips negative axes; requires |r| ≥ 0.15
 - **Decay decorrelation**: Non-Decay sliders are compensated to prevent cross-talk with the Decay PC
@@ -347,17 +349,46 @@ kicks/
 
 ## Key design decisions
 
-- **Latent_dim=32**: Reduced from 128 to prevent posterior collapse while retaining sufficient capacity for kick drum synthesis.
+- **Latent_dim=64**: Provides enough capacity to reconstruct fine spectral detail; free-bits KL (not a small bottleneck) prevents posterior collapse.
 - **Multi-resolution loss**: Average-pooling at scales 1, 2, 4 captures both fine transient detail and global spectral envelope.
-- **Frequency-weighted L1**: Linearly decaying weights emphasize lower mel bands where kick drum energy concentrates.
-- **Free bits KL**: Per-dimension KL clamped to 0.5 nats prevents individual latent dimensions from collapsing to zero.
+- **Energy-weighted L1**: Per-frame weights derived from the target's energy concentrate the loss on the kick body (~30–80 frames) instead of averaging it away over the padded silent tail; frequency weights are flat by default so high-frequency detail is not penalized less than low-frequency detail.
+- **Free bits KL**: Per-dimension KL clamped to 0.2 nats prevents individual latent dimensions from collapsing to zero.
 - **5 PCA components**: A 5th component (Decay) captures the time-domain envelope, providing independent control over sample duration.
 - **Decay decorrelation**: Moving non-Decay sliders no longer changes perceived sample length — Decay PC is automatically compensated via ratios computed from descriptor correlations.
 - **Griffin-LIM fallback**: Uses pseudo-inverse of the mel filterbank instead of `InverseMelScale` (unsupported on MPS, prone to rank errors on CPU).
-- **Fixed spectrogram bounds**: Normalization uses fixed bounds `[-11.5129, 2.5]` (BigVGAN's ln clamp), not dataset-dependent min/max — ensures consistent behavior across datasets.
+- **Fixed spectrogram bounds**: Normalization uses fixed bounds `[-11.5129, 3.0]` (BigVGAN's ln clamp), not dataset-dependent min/max — ensures consistent behavior across datasets, with headroom above the observed max (~2.23) so transient peaks are not clipped.
 - **Z-scored GMM clustering**: Latents are z-score normalized before GMM fitting, preventing magnitude differences from dominating cluster assignments.
 - **CORS restricted to single origin by default**: Configurable via `KICKS_CORS_ORIGINS` environment variable.
 - **Non-destructive strip defaults**: `--backup` is enabled by default; loops are copied, not moved, unless `--move-loops` is specified.
+
+## Audio quality: diagnosing metallic artifacts
+
+A worked example of the engineering reasoning behind the model defaults.
+
+**Symptom.** Early generated kicks had a metallic, ringing quality and lacked punch.
+
+**Diagnosis.** In a mel-VAE → neural-vocoder pipeline, that signature almost always means
+one thing: the VAE is emitting *over-smoothed* spectrograms that fall outside BigVGAN's
+training distribution, so the vocoder hallucinates ringing to fill the gaps. The fix is to
+sharpen the VAE's output, which traced back to five compounding causes:
+
+1. **β was ~300× too high** — `beta=0.3` against a reconstruction loss of order ~1–5 meant
+   the model paid more to compress than to reconstruct. Lowered to `0.02`.
+2. **High frequencies were down-weighted** in the loss (linearly decaying frequency weights),
+   rewarding blur in the exact band where "crisp vs. metallic" lives. Weights are now flat by
+   default.
+3. **The loss was diluted by silence** — it averaged over all 256 time frames, but a kick
+   only occupies ~30–80. Added energy-based temporal weighting so the loss concentrates on the
+   actual transient and decay.
+4. **Normalization clipped transient peaks** — only ~0.27 dB of headroom above the corpus max.
+   Raised `LOG_MEL_MAX` 2.5 → 3.0.
+5. **Limited latent capacity** — 32 dims capped reconstructable detail. Raised to 64 (free-bits
+   KL keeps the extra dimensions from collapsing).
+
+**Validation.** `kicks train` emits deterministic per-index reconstructions
+(`output/recon_N.wav`), so the same kick is directly A/B-comparable across training runs. The
+training loop logs `active_dims/latent_dim` and raw/mean KL each epoch to confirm the added
+capacity is actually used rather than collapsing to the prior.
 
 ## API
 
