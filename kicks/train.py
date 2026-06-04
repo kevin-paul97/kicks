@@ -22,6 +22,7 @@ def train(
     device: torch.device | None = None,
     save_dir: str = "models/",
     beta: float = 0.01,
+    free_bits: float = 0.5,
     beta_anneal_epochs: int = 0,
     beta_cycles: int = 4,
     val_split: float = 0.1,
@@ -75,7 +76,7 @@ def train(
                 data = data.to(device)
                 optimizer.zero_grad()
                 recon, mu, logvar = model(data)
-                l, recon_l, kl = loss_fn(recon, data, mu, logvar, beta=current_beta)
+                l, recon_l, kl = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits)
                 batch_loss.append(l.item())
                 batch_recon.append(recon_l.item())
                 batch_kl.append(kl.item())
@@ -95,13 +96,32 @@ def train(
             # Validation
             model.eval()
             val_losses: list[float] = []
+            mus: list[torch.Tensor] = []
+            logvars: list[torch.Tensor] = []
             with torch.no_grad():
                 for data in val_loader:
                     data = data.to(device)
                     recon, mu, logvar = model(data)
-                    vl, _, _ = loss_fn(recon, data, mu, logvar, beta=current_beta)
+                    vl, _, _ = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits)
                     val_losses.append(vl.item())
+                    mus.append(mu)
+                    logvars.append(logvar)
             val_loss = sum(val_losses) / len(val_losses) if val_losses else 0.0
+
+            # Latent diagnostics: per-dim KL over the val set tells us how many
+            # latent dimensions are actually carrying information (active) vs.
+            # collapsed to the prior, and whether free_bits is masking collapse.
+            if mus:
+                mu_all = torch.cat(mus, dim=0)
+                logvar_all = torch.cat(logvars, dim=0)
+                kl_per_dim = -0.5 * (1 + logvar_all - mu_all.pow(2) - logvar_all.exp()).mean(0)
+                active_dims = int((kl_per_dim > 0.01).sum().item())
+                raw_kl = float(kl_per_dim.sum().item())
+                mean_kl = float(kl_per_dim.mean().item())
+                progress.console.log(
+                    f"epoch {epoch + 1}: val_loss={val_loss:.4f}  beta={current_beta:.4f}  "
+                    f"active_dims={active_dims}/{model.latent_dim}  raw_kl={raw_kl:.3f}  mean_kl/dim={mean_kl:.3f}"
+                )
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss

@@ -19,9 +19,12 @@ from .model import SAMPLE_RATE, AUDIO_LENGTH, N_FFT, HOP_LENGTH, WIN_SIZE, N_MEL
 
 # Fixed bounds for normalization — derived from BigVGAN's mel_spectrogram output.
 # ln(1e-5) = -11.5129 is the silence floor (BigVGAN clamps magnitudes to 1e-5).
-# 2.5 provides headroom above the observed dataset max (~2.23).
+# 3.0 provides comfortable headroom above the observed dataset max (~2.23) so that
+# loud transient peaks are not hard-clipped (clipping degrades the punchiest part
+# of the kick). Changing this requires retraining — the model output scale is tied
+# to these bounds via denormalize().
 LOG_MEL_MIN = -11.5129
-LOG_MEL_MAX = 2.5
+LOG_MEL_MAX = 3.0
 
 # Target integrated loudness for LUFS normalization
 TARGET_LUFS = -14.0
