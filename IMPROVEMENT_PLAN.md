@@ -79,35 +79,104 @@ files to `data/kicks_quarantine/<reason>/`, manifest in
 - 2 unreadable files
 - **kept 3,892 of 4,019 files (96.8%)**
 
-VAE retrain on the cleaned corpus is running (latent_dim 64, 200 epochs,
-same CLI defaults as the current checkpoint; previous model backed up to
-`models/vae_best_phase1.pth`). After training: `kicks generate
---refresh-prior`, `kicks eval --refresh-ref`, A/B against Phase 1.
+**Measured results** (all sets scored against the same cleaned-corpus
+reference and the fixed onset detector; Phase 1/2 rows use the full
+GMM-prior + gate + best-of-4 pipeline, models differ only in training data):
 
-## Phase 3 — HF fidelity (training changes) 🔄 CODE DONE (2026-07-25), unmeasured
+| Set | Mean score | ⚠/✗ flags (10 files) | Fréchet distance |
+|---|---|---|---|
+| Old `N(0,1)` + no gate (baseline wavs) | 87.1 | 17 | 13.2 |
+| Phase 1 model (dirty corpus) | 99.1 | 7 | 16.3 |
+| **Phase 2 model (cleaned corpus)** | **99.2** | **5** | **14.1** |
 
-1. **Transient-HF loss term** ✅ implemented (`loss.py::transient_hf_loss`,
-   CLI `--hf-weight`, default 0.5). L1 on the HF click region (mel bands 50+,
-   first ~35 ms) + one-sided penalty on excess HF in the tail (after ~80 ms) —
-   directly optimizes the failing eval metrics (`hf_click_db`,
-   `hf_tail_ratio_db`). *Not active in the current Phase 2 training run*
-   (started before the change) — takes effect next run.
-2. **Model-selection by eval score** ✅ implemented (`train.py`). Every 5
-   epochs: sample latents from the val-posterior Gaussian, decode, score
-   descriptor realism vs corpus stats (spectrogram-domain proxy, no vocoder
-   needed), save best to `models/vae_best_eval.pth`. Smoke-tested end-to-end.
-3. **Continue vocoder fine-tuning on the cleaned corpus** — deferred until the
-   GPU is free (VAE retrain running). The current `checkpoint_100.pth` still
-   hisses (mitigated by the tail gate); more epochs on clean kicks plus a
-   waveform-domain silence loss on padded regions should push the noise floor
-   down at the source.
-4. **If smoothing persists:** lower KL pressure further on HF-heavy dims, or
-   swap the decoder for a mild adversarial/perceptual refinement stage.
-   Bigger effort — only after 1–3 are measured.
+Note: the baseline's previously reported 57.9 was measured with the buggy
+onset detector; 87.1 is the honest number (its real failures — hiss in
+10/10, HF smear — remain). Cleaning's gains are where predicted: brightness
+contour −2.2 → −0.6 oct (corpus median +2.1), `centroid_drop` flags 7 → 4,
+HF click −35.8 → −33.8 dB (corpus median −33.6), FD 16.3 → 14.1. Phase 2
+model best: epoch 151, val_loss 0.3367. Backed up as
+`models/vae_best_phase2.pth`.
 
-Next training run should use: `uv run kicks train` (HF term on by default),
-then compare `vae_best.pth` vs `vae_best_eval.pth` with `kicks generate` +
-`kicks eval`.
+## Phase 3 — HF fidelity (training changes) ✅ MEASURED (2026-07-25)
+
+**Outcome: the transient-HF loss (weight 0.5) did not beat Phase 2** — the
+Phase 2 model remains production (`models/vae_best.pth`):
+
+| Model | Mean score | Flags | Fréchet |
+|---|---|---|---|
+| **Phase 2 (production)** | **99.2** | **5** | **14.06** |
+| Phase 3, val-loss checkpoint | 98.6 | 9 | 16.08 |
+| Phase 3, eval-proxy checkpoint | 99.0 | 6 | 15.27 |
+
+The HF term bought a slightly stronger click on the val-loss checkpoint
+(−32.5 vs −33.8 dB) but worsened the brightness contour (−2.0 vs −0.6 oct)
+and the set-level distribution. **The eval-proxy checkpoint selection did
+validate itself** — it beat val-loss selection within the same run on every
+aggregate (15.27 vs 16.08 FD, 6 vs 9 flags). Next attempts if HF fidelity is
+revisited: lower `--hf-weight` (0.1–0.25), or click-region-only term without
+the tail penalty (the tail is already handled by the vocoder gate).
+Checkpoints kept: `vae_best_phase3.pth`, `vae_best_eval.pth`.
+
+1. **Transient-HF loss term** — implemented (`loss.py::transient_hf_loss`,
+   CLI `--hf-weight`, default 0.5) and measured: no net win at 0.5 (see
+   table above).
+2. **Model-selection by eval score** — implemented (`train.py`) and
+   validated: the proxy-selected checkpoint beat the val-loss checkpoint on
+   every set-level metric within the Phase 3 run.
+3. **Continue vocoder fine-tuning on the cleaned corpus** — still open. The
+   current `checkpoint_100.pth` hisses (mitigated by the tail gate); more
+   epochs on clean kicks plus a waveform-domain silence loss on padded
+   regions should push the noise floor down at the source.
+4. **If smoothing persists:** lower `--hf-weight` (0.1–0.25) or click-only
+   loss; lower KL pressure on HF-heavy dims; or a mild adversarial/
+   perceptual refinement stage on the decoder.
+
+## REST API generation + evaluation ✅ (2026-07-25)
+
+- `GET /evaluate` (server): same params as `/generate` (sliders + optional
+  attack/decay/drive/filter), returns eval score/grade/verdicts, waveform
+  metrics, and the 5 spectrogram descriptors. Scores exactly the audio
+  `/generate` returns (shared `_synthesize`).
+- `kicks sweep`: Latin-hypercube sample of slider space against a running
+  server; saves WAVs + `output/sweep_report.json`, prints per-kick verdicts
+  and slider↔score correlations.
+- Measured (Phase 2 model, `--control descriptor`, 20 points): **mean 98.1,
+  100% pass, worst 79.4** (extreme corner: Decay≈0 + high Sub/Punch →
+  double-hit flag). Only Decay correlates with score (r = +0.43, short-decay
+  corner is the risky region); the rest of the slider cube is uniformly
+  high-quality.
+
+## PCA-controlled generation ✅ MEASURED + UPGRADED (2026-07-25)
+
+Sweep harness (Phase 2 model, spectrogram-domain): each slider swept 0→1
+with others at 0.5, correlating slider position against all five descriptors
+and measuring effect size as % of the corpus descriptor span (2nd–98th pct).
+
+**Raw PCA sliders (shipped behavior):** direction works — every named slider
+moves its descriptor monotonically (r ≈ +1.0) — but authority is weak
+(~34% of corpus span) and cross-talk pervasive (~23%: each slider drags most
+other descriptors nearly as hard). Root causes: 5 PCs explain only ~40% of
+latent variance, and PC↔descriptor naming correlations are weak (0.15–0.34).
+
+**Fix: supervised descriptor axes** (`pca_analysis.py::DescriptorBasis`,
+`kicks serve --control descriptor`). Linear probe z→descriptors has R² 0.97–
+0.99, so descriptors are almost perfectly linearly *readable* — the axes are
+the probe's pseudo-inverse (first-order zero cross-talk). Open-loop that
+still underdelivers (~30% authority) because the *decoder's* response is
+nonlinear away from the mean; adding closed-loop Newton correction (decode →
+measure descriptors → correct, 2 iterations ≈ 2 extra VAE decodes per
+generation) gives:
+
+| Basis | Authority (named slider) | Cross-talk | Monotonicity |
+|---|---|---|---|
+| PCA (current default) | 34% | 23% | ~+1.0 |
+| Descriptor axes, open-loop | 29% | 18% | +0.86 |
+| **Descriptor axes, closed-loop** | **64%** | 23% | **+0.98** |
+
+Decay reaches 95% span, bright 63%, click 56%. Remaining gap: punch is
+promiscuous (co-moves with sub/bright — physically entangled in kicks), and
+authority is capped by what the decoder can express — expect the Phase 3
+HF-loss model to widen the click/bright axes. Re-measure after Phase 3.
 
 ## Phase 4 — Continuous verification
 

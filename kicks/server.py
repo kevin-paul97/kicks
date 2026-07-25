@@ -18,7 +18,7 @@ from kicks import KickDataset, KickDataloader, VAE
 from kicks.cluster import extract_latents
 from kicks.config import get_device, load_vae_from_checkpoint, DATA_DIR, BEST_CHECKPOINT, N_PCS
 from kicks.model import SAMPLE_RATE
-from kicks.pca_analysis import analyze_latent_space
+from kicks.pca_analysis import DESC_KEYS, DescriptorBasis, analyze_latent_space
 from kicks.vocoder import load_vocoder, spec_to_audio
 
 
@@ -37,6 +37,8 @@ class _State:
     pc_maxs: list[float]
     decay_compensation: np.ndarray | None  # per-PC ratios to cancel decay cross-talk
     decay_idx: int | None                  # index of the Decay PC
+    data_dir: str
+    eval_ref: object | None = None         # lazily built kicks.eval Reference
 
 
 _state = _State()
@@ -48,6 +50,7 @@ async def _lifespan(app: FastAPI):
     data_dir = os.environ.get("KICKS_DATA_DIR", DATA_DIR)
 
     _state.device = get_device()
+    _state.data_dir = data_dir
     _state.dataset = KickDataset(data_dir)
     dataloader = KickDataloader(_state.dataset, batch_size=32, shuffle=False)
 
@@ -59,7 +62,10 @@ async def _lifespan(app: FastAPI):
     latents, spectrograms = extract_latents(_state.model, dataloader, _state.device)
 
     print("Computing descriptors for PC naming...")
-    analysis = analyze_latent_space(latents, spectrograms)
+    control_basis = os.environ.get("KICKS_CONTROL", "pca")
+    analysis = analyze_latent_space(
+        latents, spectrograms, basis=control_basis, model=_state.model,
+    )
     _state.pca = analysis.pca
     _state.pc_projected = analysis.pc_projected
     _state.pc_names = analysis.pc_names
@@ -338,18 +344,30 @@ def _parse_pc_values(request: Request) -> list[float]:
     return pc_values
 
 
-@app.get("/generate")
-async def generate(request: Request, _rl: None = Depends(_rate_limiter)):
-    # Check LRU cache
-    cache_key = request.url.query or ""
-    if cache_key:
-        cached = _waveform_cache.get(cache_key)
-        if cached is not None:
-            return StreamingResponse(io.BytesIO(cached), media_type="audio/wav")
+def _synthesize(request: Request) -> tuple[torch.Tensor, torch.Tensor]:
+    """Slider params -> (decoded spec, shaped waveform).
 
+    Shared by /generate and /evaluate so evaluation scores exactly the audio
+    the client receives, including the optional envelope/drive/filter shaping.
+    """
     pc_values = _parse_pc_values(request)
 
-    z_np = _state.pca.inverse_transform([pc_values])
+    if isinstance(_state.pca, DescriptorBasis):
+        # Closed-loop: decode, measure descriptors, correct — the decoder's
+        # response is nonlinear, so 2 Newton steps roughly double slider
+        # authority vs the open-loop linear map.
+        from kicks.cluster import compute_descriptors
+
+        def _measure(z_arr: np.ndarray) -> list[float]:
+            zt = torch.tensor(z_arr, dtype=torch.float32).to(_state.device)
+            with torch.no_grad():
+                s = _state.model.decode(zt)
+            d = compute_descriptors(s.squeeze(0).cpu())
+            return [d[k] for k in DESC_KEYS]
+
+        z_np = _state.pca.solve(pc_values, measure_fn=_measure, n_iter=2)
+    else:
+        z_np = _state.pca.inverse_transform([pc_values])
     z = torch.tensor(z_np, dtype=torch.float32).to(_state.device)
 
     with torch.no_grad():
@@ -402,6 +420,20 @@ async def generate(request: Request, _rl: None = Depends(_rate_limiter)):
                 pass
         waveform = wf.unsqueeze(0)
 
+    return spec, waveform
+
+
+@app.get("/generate")
+async def generate(request: Request, _rl: None = Depends(_rate_limiter)):
+    # Check LRU cache
+    cache_key = request.url.query or ""
+    if cache_key:
+        cached = _waveform_cache.get(cache_key)
+        if cached is not None:
+            return StreamingResponse(io.BytesIO(cached), media_type="audio/wav")
+
+    _, waveform = _synthesize(request)
+
     buf = io.BytesIO()
     sf.write(buf, waveform.squeeze(0).numpy(), SAMPLE_RATE, format="WAV")
     buf.seek(0)
@@ -412,6 +444,43 @@ async def generate(request: Request, _rl: None = Depends(_rate_limiter)):
         buf.seek(0)
 
     return StreamingResponse(buf, media_type="audio/wav")
+
+
+@app.get("/evaluate")
+async def evaluate(request: Request, _rl: None = Depends(_rate_limiter)):
+    """Score the kick at the given slider settings.
+
+    Same query params as /generate. Returns the perceptual eval verdicts
+    (kicks.eval, waveform-domain, corpus-referenced) plus the five
+    spectrogram descriptors (sub/punch/click/bright/decay).
+    """
+    from kicks.cluster import compute_descriptors
+    from kicks.eval import analyze_kick, build_reference, score_sample
+
+    if _state.eval_ref is None:
+        _state.eval_ref = build_reference(_state.data_dir)
+
+    spec, waveform = _synthesize(request)
+
+    descriptors = compute_descriptors(spec.squeeze(0).cpu())
+    metrics = analyze_kick(waveform.squeeze(0).numpy().astype(np.float32))
+    if metrics is None:
+        return {"error": "generated audio is silent or unusable",
+                "descriptors": descriptors}
+
+    report = score_sample("api", metrics, _state.eval_ref)
+    return {
+        "score": report.score,
+        "grade": report.grade,
+        "kick_likeness_pct": report.kick_likeness_pct,
+        "verdicts": [
+            {"metric": v.key, "symbol": v.symbol, "text": v.text,
+             "percentile": v.percentile, "z": v.z}
+            for v in report.verdicts
+        ],
+        "metrics": metrics,
+        "descriptors": descriptors,
+    }
 
 
 @app.get("/spectrogram")

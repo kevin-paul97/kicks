@@ -84,6 +84,7 @@ def serve(
     port: int = typer.Option(8080, "--port", "-p", help="API port"),
     host: str = typer.Option("0.0.0.0", "--host", help="API host"),
     griffin_lim: bool = typer.Option(False, "--griffin-lim", help="Use Griffin-LIM vocoder instead of BigVGAN (lower quality, no GPU needed)"),
+    control: str = typer.Option("pca", "--control", help="Slider basis: 'pca' (unsupervised) or 'descriptor' (sliders directly target sub/punch/click/bright/decay)"),
 ) -> None:
     """Start the FastAPI synthesis server."""
     import os
@@ -93,6 +94,7 @@ def serve(
     os.environ.setdefault("KICKS_DATA_DIR", data)
     if griffin_lim:
         os.environ["KICKS_VOCODER"] = "griffinlim"
+    os.environ["KICKS_CONTROL"] = control
     uvicorn.run("kicks.server:app", host=host, port=port, reload=False)
 
 
@@ -180,6 +182,20 @@ def generate(
         vocoder_type="griffinlim" if griffin_lim else "bigvgan",
         refresh_prior=refresh_prior,
     )
+
+
+@app.command()
+def sweep(
+    server: str = typer.Option("http://localhost:8080", "--server", "-s", help="Base URL of a running kicks serve instance"),
+    count: int = typer.Option(20, "--count", "-n", help="Number of slider combinations to sample"),
+    out: str = typer.Option("output/sweep", "--out", "-o", help="Directory for generated WAVs"),
+    seed: int = typer.Option(42, "--seed", help="Random seed for slider sampling"),
+    json_out: str = typer.Option("output/sweep_report.json", "--json", help="Report JSON path"),
+) -> None:
+    """Sweep the REST API slider space and evaluate every generated kick."""
+    from kicks._sweep_cmd import run_sweep
+
+    run_sweep(server=server, count=count, out_dir=out, seed=seed, json_out=json_out)
 
 
 @app.command("eval")
