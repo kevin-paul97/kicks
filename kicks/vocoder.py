@@ -6,15 +6,50 @@ Supports two backends:
 """
 
 import glob
+import math
 import os
 
 import torch
+import torch.nn.functional as F
 import torchaudio
 
 from .model import SAMPLE_RATE, N_FFT, HOP_LENGTH, WIN_SIZE, N_MELS, FMIN, FMAX
 
 BIGVGAN_MODEL = "nvidia/bigvgan_v2_44khz_128band_256x"
 VOCODER_DIR = "models/vocoder"
+
+
+def _gate_tail(
+    waveform: torch.Tensor,
+    threshold_db: float = -70.0,
+    fade_ms: float = 80.0,
+) -> torch.Tensor:
+    """Fade the tail to digital silence once the envelope stays below threshold.
+
+    Neural vocoders leave a low-level noise floor (~-90 dBFS) where real kicks
+    decay into true silence; the exposed hiss after the kick body is the single
+    most audible artefact. Expects a peak-normalized (B, T) waveform.
+    """
+    win = 1024
+    env = torch.sqrt(
+        F.avg_pool1d((waveform ** 2).unsqueeze(1), win, stride=1, padding=win // 2)
+        .squeeze(1)[:, : waveform.shape[-1]]
+        + 1e-12
+    )
+    thr = 10 ** (threshold_db / 20)
+    fade = int(SAMPLE_RATE * fade_ms / 1000)
+    out = waveform.clone()
+    for i in range(out.shape[0]):
+        above = (env[i] > thr).nonzero()
+        if len(above) == 0:
+            continue
+        last = int(above[-1])
+        end = min(last + fade, out.shape[-1])
+        if end - last > 0:
+            ramp = 0.5 * (1 + torch.cos(torch.linspace(0, math.pi, end - last)))
+            out[i, last:end] *= ramp
+        out[i, end:] = 0.0
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +114,7 @@ def _bigvgan_spec_to_audio(
     waveform = torchaudio.functional.highpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=25.0)
     waveform = torchaudio.functional.lowpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=20000.0)
     waveform = waveform / (waveform.abs().max() + 1e-8)
-    return waveform
+    return _gate_tail(waveform)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +183,7 @@ def _griffinlim_spec_to_audio(
     waveform = torchaudio.functional.highpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=25.0)
     waveform = torchaudio.functional.lowpass_biquad(waveform, SAMPLE_RATE, cutoff_freq=20000.0)
     waveform = waveform / (waveform.abs().max() + 1e-8)
-    return waveform
+    return _gate_tail(waveform)
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,51 @@ from .loss import loss as loss_fn
 from .model import VAE
 
 
+def _corpus_descriptor_stats(dataset) -> tuple["np.ndarray", "np.ndarray"]:  # noqa: F821
+    """Per-descriptor mean/std over the training corpus (proxy-score reference)."""
+    import numpy as np
+
+    from .cluster import compute_descriptors
+
+    rows = [list(compute_descriptors(dataset[i]).values()) for i in range(len(dataset))]
+    X = np.asarray(rows)
+    return X.mean(axis=0), X.std(axis=0) + 1e-8
+
+
+def _eval_proxy_score(
+    model: VAE,
+    mu_all: torch.Tensor,
+    desc_mean,
+    desc_std,
+    device: torch.device,
+    n_samples: int = 32,
+) -> float:
+    """Spectrogram-domain generative realism proxy (no vocoder needed).
+
+    Samples latents from a Gaussian fit to the val-set posterior means,
+    decodes them, and measures how far the decoded kicks' perceptual
+    descriptors sit from the corpus distribution (mean |z-score|; lower is
+    better). Tracks what `kicks eval` measures well enough for checkpoint
+    selection, at a tiny fraction of the cost.
+    """
+    import numpy as np
+
+    from .cluster import compute_descriptors
+
+    mean = mu_all.mean(dim=0)
+    cov = torch.cov(mu_all.T) + 1e-4 * torch.eye(mu_all.shape[1], device=mu_all.device)
+    chol = torch.linalg.cholesky(cov)
+    eps = torch.randn(n_samples, mu_all.shape[1], device=mu_all.device)
+    z = mean + eps @ chol.T
+    with torch.no_grad():
+        specs = model.decode(z.to(device)).cpu()
+    scores = []
+    for i in range(n_samples):
+        d = np.asarray(list(compute_descriptors(specs[i]).values()))
+        scores.append(np.abs((d - desc_mean) / desc_std).mean())
+    return float(np.mean(scores))
+
+
 def train(
     model: VAE,
     dloader: DataLoader,
@@ -27,12 +72,20 @@ def train(
     beta_cycles: int = 4,
     val_split: float = 0.1,
     scheduler: LRScheduler | None = None,
+    hf_weight: float = 0.5,
+    eval_every: int = 5,
 ) -> dict[str, list[float]]:
     """Train the VAE. Returns per-epoch average losses for loss, recon, kl.
 
     Beta annealing uses a cyclical schedule: beta ramps linearly from 0 to the
     target value over (beta_anneal_epochs / beta_cycles) epochs, then repeats.
     This prevents posterior collapse while maintaining reconstruction quality.
+
+    Alongside the val-loss best checkpoint (vae_best.pth), every `eval_every`
+    epochs a generative eval-proxy score is computed (decode latents sampled
+    from the val posterior, measure descriptor realism vs the corpus) and the
+    best-scoring model is saved to vae_best_eval.pth — checkpoint selection
+    aligned with what `kicks eval` measures rather than pixel loss.
     """
     epoch_loss: list[float] = []
     epoch_recon: list[float] = []
@@ -48,6 +101,8 @@ def train(
     val_loader = DataLoader(val_set, batch_size=dloader.batch_size, shuffle=False)
 
     best_val_loss = float("inf")
+    best_proxy = float("inf")
+    desc_mean, desc_std = _corpus_descriptor_stats(dataset)
 
     with Progress(
         TextColumn("[bold blue]Epoch {task.fields[epoch]}"),
@@ -76,7 +131,7 @@ def train(
                 data = data.to(device)
                 optimizer.zero_grad()
                 recon, mu, logvar = model(data)
-                l, recon_l, kl = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits)
+                l, recon_l, kl = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits, hf_weight=hf_weight)
                 batch_loss.append(l.item())
                 batch_recon.append(recon_l.item())
                 batch_kl.append(kl.item())
@@ -102,7 +157,7 @@ def train(
                 for data in val_loader:
                     data = data.to(device)
                     recon, mu, logvar = model(data)
-                    vl, _, _ = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits)
+                    vl, _, _ = loss_fn(recon, data, mu, logvar, beta=current_beta, free_bits=free_bits, hf_weight=hf_weight)
                     val_losses.append(vl.item())
                     mus.append(mu)
                     logvars.append(logvar)
@@ -131,6 +186,26 @@ def train(
                     "val_loss": val_loss,
                     "latent_dim": model.latent_dim,
                 }, save_dir + "vae_best.pth")
+
+            # Generative eval proxy: descriptor realism of decoded samples
+            if mus and eval_every > 0 and (epoch + 1) % eval_every == 0:
+                proxy = _eval_proxy_score(
+                    model, mu_all.cpu(), desc_mean, desc_std, device,
+                )
+                marker = ""
+                if proxy < best_proxy:
+                    best_proxy = proxy
+                    torch.save({
+                        "model": model.state_dict(),
+                        "epoch": epoch + 1,
+                        "val_loss": val_loss,
+                        "eval_proxy": proxy,
+                        "latent_dim": model.latent_dim,
+                    }, save_dir + "vae_best_eval.pth")
+                    marker = "  (new best → vae_best_eval.pth)"
+                progress.console.log(
+                    f"epoch {epoch + 1}: eval_proxy={proxy:.3f}{marker}"
+                )
 
     # Save final checkpoint
     torch.save({

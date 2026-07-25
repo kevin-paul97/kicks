@@ -50,56 +50,9 @@ class KickDataset(Dataset):
             if not file.endswith(".wav"):
                 continue
             path = os.path.join(dir, file)
-            data, sr = sf.read(path, dtype="float32")
-            # sf.read returns (samples,) for mono or (samples, channels) for stereo
-            if data.ndim == 1:
-                audio = torch.from_numpy(data).unsqueeze(0)  # (1, samples)
-            else:
-                audio = torch.from_numpy(data.T)  # (channels, samples)
-
-            # Convert to mono
-            if audio.shape[0] > 1:
-                audio = torch.mean(audio, dim=0, keepdim=True)
-
-            # Resample to target sample rate
-            if sr != SAMPLE_RATE:
-                resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
-                audio = resampler(audio)
-
-            # Pad/truncate to fixed length
-            length = audio.shape[-1]
-            if length > AUDIO_LENGTH:
-                audio = audio[:, :AUDIO_LENGTH]
-            elif length < AUDIO_LENGTH:
-                audio = torch.nn.functional.pad(audio, (0, AUDIO_LENGTH - length))
-
-            # LUFS loudness normalization
-            audio_np = audio.squeeze(0).numpy()
-            loudness = self._lufs_meter.integrated_loudness(audio_np)
-            if np.isfinite(loudness):
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="Possible clipped samples", module="pyloudnorm")
-                    audio_np = pyln.normalize.loudness(audio_np, loudness, TARGET_LUFS)
-                audio_np = np.clip(audio_np, -1.0, 1.0)
-                audio = torch.from_numpy(audio_np).unsqueeze(0).float()
-
-            # Compute log-mel spectrogram using BigVGAN's function.
-            # This produces magnitude-based log mel with ln(clamp(mel, min=1e-5)).
-            log_mel = bigvgan_mel_spectrogram(
-                audio, N_FFT, N_MELS, SAMPLE_RATE, HOP_LENGTH, WIN_SIZE,
-                FMIN, FMAX, center=False,
-            )  # (1, N_MELS, T)
-
-            # Pad/truncate to 256 frames
-            if log_mel.shape[-1] > 256:
-                log_mel = log_mel[:, :, :256]
-            elif log_mel.shape[-1] < 256:
-                log_mel = torch.nn.functional.pad(log_mel, (0, 256 - log_mel.shape[-1]))
-
-            # Normalize to [0, 1] using fixed bounds
-            log_mel = torch.clamp(log_mel, min=LOG_MEL_MIN, max=LOG_MEL_MAX)
-            normalized = (log_mel - LOG_MEL_MIN) / (LOG_MEL_MAX - LOG_MEL_MIN)
-
+            normalized = self.process_file(path, self._lufs_meter)
+            if normalized is None:
+                continue
             self.tensors.append(normalized)
             self.paths.append(path)
 
@@ -112,6 +65,69 @@ class KickDataset(Dataset):
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         return self.tensors[idx]
+
+    @staticmethod
+    def process_file(path: str, lufs_meter: "pyln.Meter | None" = None) -> torch.Tensor | None:
+        """Load one .wav and convert to a normalized (1, 128, 256) spectrogram.
+
+        Same pipeline as the dataset loader: mono → resample → pad/truncate →
+        LUFS norm → BigVGAN log-mel → fixed-bounds [0, 1]. Returns None for
+        unreadable files.
+        """
+        if lufs_meter is None:
+            lufs_meter = pyln.Meter(SAMPLE_RATE)
+        try:
+            data, sr = sf.read(path, dtype="float32")
+        except Exception:
+            return None
+        # sf.read returns (samples,) for mono or (samples, channels) for stereo
+        if data.ndim == 1:
+            audio = torch.from_numpy(data).unsqueeze(0)  # (1, samples)
+        else:
+            audio = torch.from_numpy(data.T)  # (channels, samples)
+
+        # Convert to mono
+        if audio.shape[0] > 1:
+            audio = torch.mean(audio, dim=0, keepdim=True)
+
+        # Resample to target sample rate
+        if sr != SAMPLE_RATE:
+            resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
+            audio = resampler(audio)
+
+        # Pad/truncate to fixed length
+        length = audio.shape[-1]
+        if length > AUDIO_LENGTH:
+            audio = audio[:, :AUDIO_LENGTH]
+        elif length < AUDIO_LENGTH:
+            audio = torch.nn.functional.pad(audio, (0, AUDIO_LENGTH - length))
+
+        # LUFS loudness normalization
+        audio_np = audio.squeeze(0).numpy()
+        loudness = lufs_meter.integrated_loudness(audio_np)
+        if np.isfinite(loudness):
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Possible clipped samples", module="pyloudnorm")
+                audio_np = pyln.normalize.loudness(audio_np, loudness, TARGET_LUFS)
+            audio_np = np.clip(audio_np, -1.0, 1.0)
+            audio = torch.from_numpy(audio_np).unsqueeze(0).float()
+
+        # Compute log-mel spectrogram using BigVGAN's function.
+        # This produces magnitude-based log mel with ln(clamp(mel, min=1e-5)).
+        log_mel = bigvgan_mel_spectrogram(
+            audio, N_FFT, N_MELS, SAMPLE_RATE, HOP_LENGTH, WIN_SIZE,
+            FMIN, FMAX, center=False,
+        )  # (1, N_MELS, T)
+
+        # Pad/truncate to 256 frames
+        if log_mel.shape[-1] > 256:
+            log_mel = log_mel[:, :, :256]
+        elif log_mel.shape[-1] < 256:
+            log_mel = torch.nn.functional.pad(log_mel, (0, 256 - log_mel.shape[-1]))
+
+        # Normalize to [0, 1] using fixed bounds
+        log_mel = torch.clamp(log_mel, min=LOG_MEL_MIN, max=LOG_MEL_MAX)
+        return (log_mel - LOG_MEL_MIN) / (LOG_MEL_MAX - LOG_MEL_MIN)
 
     @staticmethod
     def denormalize(spec: torch.Tensor) -> torch.Tensor:

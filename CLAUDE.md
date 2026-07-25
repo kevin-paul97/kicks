@@ -14,6 +14,9 @@ uv run kicks tui                       # Terminal UI synthesizer
 uv run kicks strip --dry-run           # Preprocess samples (preview)
 uv run kicks strip --backup            # Preprocess samples (with backup)
 uv run kicks cluster                   # Run corpus analysis (GMM + PCA)
+uv run kicks eval                      # Score generated kicks vs corpus (perceptual verdicts)
+uv run kicks clean                     # Quarantine loops/outliers from corpus (dry-run; --apply to move)
+uv run kicks generate                  # Generate kicks (GMM latent prior + best-of-k eval selection)
 uv run kicks fine-tune                 # Fine-tune BigVGAN vocoder
 
 # Frontend
@@ -41,10 +44,10 @@ docker compose up -d backend           # Backend-only (GPU recommended)
 
 - **`cli.py`** — Typer CLI entry point. All subcommands (`train`, `serve`, `tui`, `cluster`, `strip`, `fine-tune`) are defined here with their `typer.Option` signatures. Each command imports implementation lazily.
 - **`model.py`** — `VAE` class (2D Conv, latent_dim=32 default) + audio constants (`SAMPLE_RATE=44100`, `AUDIO_LENGTH=65536`, `N_FFT=1024`, `HOP_LENGTH=256`, `N_MELS=128`). These constants must stay in sync with BigVGAN's config.
-- **`loss.py`** — Multi-resolution reconstruction (spectral convergence + frequency-weighted L1 at scales 1,2,4) + β·KL with 0.5-nat free bits per dimension. Frequency weights are cached per (n_mels, device).
+- **`loss.py`** — Multi-resolution reconstruction (spectral convergence + frequency-weighted L1 at scales 1,2,4) + β·KL with 0.5-nat free bits per dimension. Frequency weights are cached per (n_mels, device). `transient_hf_loss` (weight via `--hf-weight`, default 0.5) adds L1 on the HF click region (bands 50+, first ~35 ms) and a one-sided penalty on excess HF in the tail — targets the eval metrics `hf_click_db` / `hf_tail_ratio_db`.
 - **`dataset.py`** — `KickDataset`: loads .wav → mono → resample → pad/truncate → LUFS norm (-14 dB) → BigVGAN mel spectrogram → fixed-bounds norm [-11.51, 2.5] → [0, 1]. Uses `bigvgan.mel_spectrogram()` so representation matches vocoder input.
 - **`dataloader.py`** — Thin `DataLoader` subclass (`KickDataloader`), an extension point for custom batching.
-- **`train.py`** — `train()` function handles the training loop with cyclical beta annealing, CosineAnnealingLR, 10% validation split, best-checkpoint saving, and loss plots. The CLI passes its defaults to this function.
+- **`train.py`** — `train()` function handles the training loop with cyclical beta annealing, CosineAnnealingLR, 10% validation split, best-checkpoint saving, and loss plots. The CLI passes its defaults to this function. Every `eval_every` (5) epochs it also computes a generative eval-proxy score (decode latents sampled from the val posterior, descriptor realism vs corpus) and saves the best to `vae_best_eval.pth` — checkpoint selection aligned with `kicks eval`, not just pixel loss.
 - **`config.py`** — Device detection (CUDA > MPS > CPU), checkpoint loading with auto-detected latent_dim, path constants. Paths overridable via env vars (`KICKS_DATA_DIR`, `KICKS_MODEL_DIR`, `KICKS_OUTPUT_DIR`).
 - **`vocoder.py`** — Two backends: `load_bigvgan()` (neural, high quality, GPU recommended) and `load_griffin_lim()` (CPU-only, no model download). `spec_to_audio()` dispatches based on vocoder type. Both apply 25 Hz highpass + 20 kHz lowpass + peak normalization. Fine-tuned weights auto-loaded from `models/vocoder/best.pth`.
 - **`server.py`** — FastAPI app with lifespan that loads model + PCA + descriptors on startup. Rate-limited (10 req/s token bucket) with LRU audio cache (100 entries), CORS restricted to `KICKS_CORS_ORIGINS`. Endpoints: `GET /config` (slider definitions), `GET /generate` (audio WAV with optional `attack_ms`, `decay_ms`, `drive`, `filter` params), `GET /spectrogram` (raw spectrogram data). Includes embedded standalone HTML UI at `GET /`.
@@ -52,6 +55,8 @@ docker compose up -d backend           # Backend-only (GPU recommended)
 - **`cluster.py`** — `extract_latents()`, `select_n_clusters()` (BIC), `fit_gmm()`, `compute_descriptors()` (5 perceptual features from spectrogram). Descriptors: sub, punch, click, bright, decay.
 - **`_cluster_cmd.py`** — CLI implementation for clustering. Z-scores latents for GMM, runs PCA on z-scored descriptors (5D→3D), computes correlations, generates per-cluster average audio. Saves to `output/cluster_analysis.json`.
 - **`_strip_cmd.py`** — CLI implementation for preprocessing. Low-frequency envelope + HF onset detection + energy-envelope autocorrelation for loop detection. Default backup is enabled (`--backup`), defaults to non-destructive copy behavior.
+- **`eval.py`** — Automatic perceptual evaluation (`kicks eval`). Waveform-domain metrics (HF decay/tail ratio, tail flatness, onset count, sub pitch, pitch glide, noise floor …) scored against reference-corpus distributions (cached in `output/eval_reference.json` — pass `--refresh-ref` after corpus changes). Translates z-scores/percentiles into ✓/⚠/✗ verdicts, 0–100 score, and a set-level Fréchet distance. numpy/scipy only — no torch import.
+- **`generate.py`** — `kicks generate`. Samples latents from an 8-component GMM fitted on corpus latent µ vectors (aggregate posterior, cached in `models/latent_prior.npz` — pass `--refresh-prior` after retraining) instead of `N(0,1)`, decodes best-of-k candidates per output slot, keeps the highest `eval` score.
 - **`pca_analysis.py`** — Shared PCA analysis used by both `server.py` and `tui.py`. Fits PCA (5 components), auto-names PCs by perceptual descriptor correlation (flips negative axes, requires |r| ≥ 0.15), computes decay decorrelation ratios. Returns `PCAnalysis` dataclass.
 - **`finetune.py`** — BigVGAN GAN fine-tuning. Freezes all but last 2 upsampling blocks. MPD + CQT discriminators. Supports resuming from checkpoints.
 

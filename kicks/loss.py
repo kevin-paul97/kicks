@@ -75,6 +75,34 @@ def multi_resolution_loss(
     return total
 
 
+def transient_hf_loss(
+    recon: torch.Tensor,
+    target: torch.Tensor,
+    hf_band: int = 50,
+    click_frames: int = 6,
+    tail_start: int = 14,
+) -> torch.Tensor:
+    """High-frequency transient fidelity term.
+
+    Targets the two perceptual failures `kicks eval` finds in generated kicks:
+    the missing HF click (VAE over-smoothing averages away the bright
+    transient) and HF energy smeared into the tail. Mel band ~50 ≈ 2 kHz;
+    frame hop ≈ 5.8 ms, so click_frames=6 ≈ first 35 ms and tail_start=14
+    ≈ 80 ms — matching the eval metrics' windows.
+
+    The click term is a plain L1 (reproduce the transient exactly); the tail
+    term is one-sided, penalizing only *excess* HF the target doesn't have,
+    so real long-tailed kicks are not pushed toward silence.
+    """
+    click = (
+        recon[..., hf_band:, :click_frames] - target[..., hf_band:, :click_frames]
+    ).abs().mean()
+    tail_excess = (
+        recon[..., hf_band:, tail_start:] - target[..., hf_band:, tail_start:]
+    ).clamp(min=0).mean()
+    return click + tail_excess
+
+
 def loss(
     recon: torch.Tensor,
     x: torch.Tensor,
@@ -82,16 +110,21 @@ def loss(
     logvar: torch.Tensor,
     beta: float = 0.001,
     free_bits: float = 0.5,
+    hf_weight: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Beta-VAE loss: multi-resolution reconstruction + beta * KL with free bits.
 
     Per-dimension KL is clamped to `free_bits` nats before summing, preventing
     individual latent dimensions from collapsing to zero (posterior collapse).
+    hf_weight scales the transient-HF fidelity term (0 disables it).
 
-    Returns (total_loss, recon_loss, kl) for separate logging.
+    Returns (total_loss, recon_loss, kl) for separate logging; the HF term is
+    folded into recon_loss.
     """
     batch_size = x.size(0)
     recon_loss = multi_resolution_loss(recon, x)
+    if hf_weight > 0:
+        recon_loss = recon_loss + hf_weight * transient_hf_loss(recon, x)
     kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean(0)
     kl = kl_per_dim.clamp(min=free_bits).sum()
     return recon_loss + beta * kl, recon_loss, kl
