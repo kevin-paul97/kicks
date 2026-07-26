@@ -123,10 +123,12 @@ Checkpoints kept: `vae_best_phase3.pth`, `vae_best_eval.pth`.
 2. **Model-selection by eval score** — implemented (`train.py`) and
    validated: the proxy-selected checkpoint beat the val-loss checkpoint on
    every set-level metric within the Phase 3 run.
-3. **Continue vocoder fine-tuning on the cleaned corpus** — still open. The
-   current `checkpoint_100.pth` hisses (mitigated by the tail gate); more
-   epochs on clean kicks plus a waveform-domain silence loss on padded
-   regions should push the noise floor down at the source.
+3. **Vocoder fine-tuning** — closed as out of scope for local hardware
+   (decision 2026-07-26): BigVGAN GAN fine-tuning is too heavy for this
+   machine. The existing Colab-tuned `checkpoint_100.pth` stays as is; its
+   residual noise floor is fully handled by the vocoder tail gate. If ever
+   revisited, use `finetune_vocoder_colab.ipynb` on a cloud GPU with the
+   cleaned corpus.
 4. **If smoothing persists:** lower `--hf-weight` (0.1–0.25) or click-only
    loss; lower KL pressure on HF-heavy dims; or a mild adversarial/
    perceptual refinement stage on the decoder.
