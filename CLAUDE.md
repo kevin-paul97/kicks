@@ -72,7 +72,7 @@ docker compose up -d backend           # Backend-only (GPU recommended)
 - **Preset management** — Save/load/delete slider presets via `localStorage` (`kicks_presets` key).
 - **Keyboard shortcuts** — Space=generate, R=randomize, S=download (ignored when typing in inputs).
 - **Corpus analysis** at `/cluster` page: EDA, PCA variance, scatter plots (2D + 3D), cluster profiles, sample inspector.
-- **Math page** at `/math`: full pipeline documentation with KaTeX LaTeX equations.
+- **Math page** at `/maths`: full pipeline documentation with KaTeX LaTeX equations.
 
 ### Key data contracts
 

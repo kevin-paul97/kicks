@@ -321,7 +321,7 @@ kicks/
 │   ├── app/
 │   │   ├── page.tsx             # Synthesizer page (3-column layout + sequencer)
 │   │   ├── cluster/page.tsx     # Corpus analysis dashboard
-│   │   ├── math/page.tsx        # Mathematical foundations (LaTeX docs)
+│   │   ├── maths/page.tsx       # Signal-processing math (LaTeX docs)
 │   │   └── api/
 │   │       ├── config/          # Slider configuration endpoint proxy
 │   │       ├── generate/        # Audio generation endpoint proxy
